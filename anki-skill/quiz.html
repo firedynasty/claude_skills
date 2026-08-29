@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Knowledge Gap Quiz</title>
+<style>
+  :root {
+    --bg: #0f0f0f;
+    --surface: #1a1a1a;
+    --border: #2a2a2a;
+    --text: #e8e8e8;
+    --muted: #888;
+    --accent: #4f8ef7;
+    --solid: #2d6a4f;
+    --shaky: #9b5e1a;
+    --missing: #6b2d2d;
+    --solid-text: #74c69d;
+    --shaky-text: #f4a261;
+    --missing-text: #e76f51;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 2rem 1rem;
+  }
+
+  h1 {
+    font-size: 1.4rem;
+    font-weight: 600;
+    color: var(--accent);
+    margin-bottom: 0.4rem;
+  }
+
+  .subtitle {
+    color: var(--muted);
+    font-size: 0.9rem;
+    margin-bottom: 2rem;
+  }
+
+  /* ── Input step ─────────────────────────────────────────────────────────── */
+  #setup {
+    width: 100%;
+    max-width: 680px;
+  }
+
+  textarea {
+    width: 100%;
+    height: 180px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 0.95rem;
+    padding: 1rem;
+    resize: vertical;
+    outline: none;
+    font-family: inherit;
+  }
+
+  textarea:focus { border-color: var(--accent); }
+
+  .hint {
+    color: var(--muted);
+    font-size: 0.8rem;
+    margin-top: 0.5rem;
+    margin-bottom: 1.2rem;
+  }
+
+  button {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 0.6rem 1.4rem;
+    font-size: 0.95rem;
+    cursor: pointer;
+    font-family: inherit;
+    font-weight: 500;
+  }
+
+  button:hover { opacity: 0.85; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* ── Quiz step ──────────────────────────────────────────────────────────── */
+  #quiz { width: 100%; max-width: 680px; display: none; }
+
+  .progress-bar {
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    margin-bottom: 1.5rem;
+  }
+
+  .progress-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 0.3s ease;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.6rem;
+    margin-bottom: 1.2rem;
+  }
+
+  .card-count {
+    color: var(--muted);
+    font-size: 0.8rem;
+    margin-bottom: 0.6rem;
+  }
+
+  .question {
+    font-size: 1.1rem;
+    font-weight: 500;
+    margin-bottom: 1rem;
+  }
+
+  .answer-area {
+    width: 100%;
+    height: 90px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 0.95rem;
+    padding: 0.75rem;
+    resize: none;
+    outline: none;
+    font-family: inherit;
+    margin-bottom: 0.8rem;
+  }
+
+  .answer-area:focus { border-color: var(--accent); }
+
+  .btn-row { display: flex; gap: 0.6rem; flex-wrap: wrap; }
+
+  .btn-solid   { background: var(--solid); }
+  .btn-shaky   { background: var(--shaky); }
+  .btn-missing { background: var(--missing); }
+
+  .reveal-section { display: none; margin-top: 1rem; }
+
+  .model-answer {
+    background: var(--bg);
+    border-left: 3px solid var(--accent);
+    padding: 0.75rem 1rem;
+    border-radius: 0 6px 6px 0;
+    font-size: 0.9rem;
+    color: var(--muted);
+    white-space: pre-wrap;
+  }
+
+  /* ── Results step ───────────────────────────────────────────────────────── */
+  #results { width: 100%; max-width: 680px; display: none; }
+
+  .summary-row {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+  }
+
+  .badge {
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    font-weight: 600;
+  }
+
+  .badge-solid   { background: var(--solid);   color: var(--solid-text); }
+  .badge-shaky   { background: var(--shaky);   color: var(--shaky-text); }
+  .badge-missing { background: var(--missing); color: var(--missing-text); }
+
+  .result-item {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.2rem;
+    margin-bottom: 0.6rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.8rem;
+  }
+
+  .result-label {
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    white-space: nowrap;
+    margin-top: 2px;
+    flex-shrink: 0;
+  }
+
+  .label-solid   { background: var(--solid);   color: var(--solid-text); }
+  .label-shaky   { background: var(--shaky);   color: var(--shaky-text); }
+  .label-missing { background: var(--missing); color: var(--missing-text); }
+
+  .result-q { font-size: 0.95rem; }
+
+  .copy-section {
+    margin-top: 1.5rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.2rem;
+  }
+
+  .copy-section h3 {
+    font-size: 0.9rem;
+    color: var(--muted);
+    margin-bottom: 0.6rem;
+    font-weight: 500;
+  }
+
+  pre {
+    background: var(--bg);
+    padding: 0.75rem;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    color: var(--text);
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  .btn-copy { margin-top: 0.6rem; font-size: 0.85rem; padding: 0.4rem 1rem; }
+</style>
+</head>
+<body>
+
+<h1>Knowledge Gap Quiz</h1>
+<p class="subtitle">Paste questions + model answers below. Rate each one to find your gaps.</p>
+
+<!-- ── Setup ──────────────────────────────────────────────────────────────── -->
+<div id="setup">
+  <textarea id="input" placeholder='Paste Claude-generated Q&A pairs here.
+
+Accepted formats:
+
+1. Question?
+Answer text here.
+
+---
+
+2. Next question?
+Answer text.
+
+Or paste a JSON array:
+[{"q":"Question?","a":"Answer."},...]'></textarea>
+  <p class="hint">Each entry becomes one quiz card. Press Start when ready.</p>
+  <button onclick="startQuiz()">Start Quiz</button>
+</div>
+
+<!-- ── Quiz ──────────────────────────────────────────────────────────────── -->
+<div id="quiz">
+  <div class="progress-bar"><div class="progress-fill" id="progress"></div></div>
+  <div class="card">
+    <div class="card-count" id="count"></div>
+    <div class="question" id="question"></div>
+    <textarea class="answer-area" id="userAnswer" placeholder="Type your answer…"></textarea>
+    <div class="btn-row">
+      <button onclick="reveal()">Reveal answer</button>
+    </div>
+    <div class="reveal-section" id="revealSection">
+      <div class="model-answer" id="modelAnswer"></div>
+      <div class="btn-row" style="margin-top:0.8rem">
+        <button class="btn-solid"   onclick="rate('solid')">Solid ✓</button>
+        <button class="btn-shaky"   onclick="rate('shaky')">Shaky ~</button>
+        <button class="btn-missing" onclick="rate('missing')">Blank ✗</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Results ────────────────────────────────────────────────────────────── -->
+<div id="results">
+  <div class="summary-row" id="summary"></div>
+  <div id="resultList"></div>
+  <div class="copy-section">
+    <h3>Gap topics for Claude (copy into chat → "make Anki cards for these gaps")</h3>
+    <pre id="gapText"></pre>
+    <button class="btn-copy" onclick="copyGaps()">Copy gaps</button>
+  </div>
+</div>
+
+<script>
+let cards = [];
+let current = 0;
+let ratings = [];
+
+function parseInput(raw) {
+  raw = raw.trim();
+  // Try JSON array
+  if (raw.startsWith('[')) {
+    try {
+      const arr = JSON.parse(raw);
+      return arr.map(x => ({ q: x.q || x.question || x.front, a: x.a || x.answer || x.back }));
+    } catch {}
+  }
+  // Numbered list: "1. Q?\nA text\n\n2. ..."  or "---" separated
+  const blocks = raw.split(/\n\s*[-—]{3,}\s*\n|\n\n(?=\d+\.)/);
+  const result = [];
+  for (const block of blocks) {
+    const lines = block.trim().split('\n').filter(Boolean);
+    if (lines.length < 2) continue;
+    // First line = question (strip leading "1." etc.)
+    const q = lines[0].replace(/^\d+\.\s*/, '').trim();
+    const a = lines.slice(1).join('\n').trim();
+    if (q && a) result.push({ q, a });
+  }
+  return result;
+}
+
+function startQuiz() {
+  const raw = document.getElementById('input').value;
+  cards = parseInput(raw);
+  if (!cards.length) {
+    alert('Could not parse any Q&A pairs. Check the format hint in the placeholder.');
+    return;
+  }
+  ratings = new Array(cards.length).fill(null);
+  current = 0;
+  document.getElementById('setup').style.display = 'none';
+  document.getElementById('quiz').style.display = 'block';
+  showCard();
+}
+
+function showCard() {
+  const c = cards[current];
+  document.getElementById('count').textContent = `Question ${current + 1} of ${cards.length}`;
+  document.getElementById('question').textContent = c.q;
+  document.getElementById('userAnswer').value = '';
+  document.getElementById('revealSection').style.display = 'none';
+  document.getElementById('modelAnswer').textContent = '';
+  document.getElementById('progress').style.width =
+    ((current / cards.length) * 100) + '%';
+}
+
+function reveal() {
+  document.getElementById('modelAnswer').textContent = cards[current].a;
+  document.getElementById('revealSection').style.display = 'block';
+}
+
+function rate(label) {
+  ratings[current] = label;
+  current++;
+  if (current < cards.length) {
+    showCard();
+  } else {
+    showResults();
+  }
+}
+
+function showResults() {
+  document.getElementById('quiz').style.display = 'none';
+  document.getElementById('results').style.display = 'block';
+
+  const counts = { solid: 0, shaky: 0, missing: 0 };
+  for (const r of ratings) if (r) counts[r]++;
+
+  document.getElementById('summary').innerHTML = `
+    <div class="badge badge-solid">Solid: ${counts.solid}</div>
+    <div class="badge badge-shaky">Shaky: ${counts.shaky}</div>
+    <div class="badge badge-missing">Blank: ${counts.missing}</div>
+  `;
+
+  const list = document.getElementById('resultList');
+  list.innerHTML = '';
+  const gaps = [];
+
+  cards.forEach((c, i) => {
+    const r = ratings[i] || 'missing';
+    const labelClass = `label-${r}`;
+    const labelText = r === 'solid' ? 'Solid ✓' : r === 'shaky' ? 'Shaky ~' : 'Blank ✗';
+    list.innerHTML += `
+      <div class="result-item">
+        <span class="result-label ${labelClass}">${labelText}</span>
+        <div class="result-q">${escHtml(c.q)}</div>
+      </div>`;
+    if (r !== 'solid') gaps.push(`• ${c.q}`);
+  });
+
+  document.getElementById('gapText').textContent =
+    gaps.length
+      ? `I need Anki cards for these gaps:\n\n${gaps.join('\n')}`
+      : 'No gaps — you knew everything!';
+}
+
+function copyGaps() {
+  navigator.clipboard.writeText(document.getElementById('gapText').textContent)
+    .then(() => {
+      const btn = document.querySelector('.btn-copy');
+      btn.textContent = 'Copied!';
+      setTimeout(() => { btn.textContent = 'Copy gaps'; }, 1500);
+    });
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Anki Manager</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #f5f5f3;
+  --surface: #ffffff;
+  --border: #e2e2e0;
+  --muted: #888;
+  --text: #1a1a1a;
+  --accent: #2563eb;
+  --accent-bg: #eff6ff;
+  --danger: #dc2626;
+  --success: #16a34a;
+  --sidebar-w: 240px;
+}
+
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
+
+/* ── TOP BAR ── */
+.topbar {
+  height: 48px; background: var(--surface); border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 10px; padding: 0 16px;
+  flex-shrink: 0; z-index: 10;
+}
+.topbar h1 { font-size: 15px; font-weight: 700; color: var(--accent); margin-right: 4px; }
+.topbar input[type="text"] {
+  flex: 1; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px;
+  font-size: 13px; font-family: inherit; max-width: 400px;
+}
+.topbar input[type="text"]:focus { outline: none; border-color: var(--accent); }
+.btn {
+  border: none; border-radius: 6px; padding: 6px 12px; font-size: 12px;
+  font-weight: 600; cursor: pointer; font-family: inherit; white-space: nowrap;
+}
+.btn.primary { background: var(--accent); color: #fff; }
+.btn.primary:hover { background: #1d4ed8; }
+.btn.outline { background: none; border: 1px solid var(--border); color: #555; }
+.btn.outline:hover { background: #f0f0f0; }
+.btn.danger  { background: var(--danger); color: #fff; }
+.btn.danger:hover { opacity: .85; }
+.btn.sm { padding: 4px 10px; font-size: 11px; }
+.btn:disabled { opacity: .4; cursor: not-allowed; }
+
+/* ── LAYOUT ── */
+.layout { display: flex; flex: 1; overflow: hidden; }
+
+/* ── SIDEBAR ── */
+.sidebar {
+  width: var(--sidebar-w); background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.sidebar-header {
+  padding: 10px 12px; font-size: 11px; font-weight: 700;
+  letter-spacing: 1px; text-transform: uppercase; color: var(--muted);
+  border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between;
+}
+.sidebar-list { overflow-y: auto; flex: 1; padding: 4px 0; }
+.deck-item {
+  padding: 7px 12px; font-size: 13px; cursor: pointer;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 6px; border-radius: 0; transition: background .1s;
+}
+.deck-item:hover { background: var(--accent-bg); }
+.deck-item.active { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
+.deck-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.deck-count { font-size: 11px; color: var(--muted); flex-shrink: 0; }
+.deck-item.child { padding-left: 24px; font-size: 12px; }
+.deck-item.grandchild { padding-left: 36px; }
+
+/* ── MAIN ── */
+.main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+.toolbar {
+  padding: 8px 16px; background: var(--surface); border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0; flex-wrap: wrap;
+}
+.toolbar .deck-title { font-size: 14px; font-weight: 700; margin-right: 4px; }
+.count-pill {
+  font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px;
+  background: #e0f2fe; color: #0369a1;
+}
+.spacer { flex: 1; }
+
+/* ── TABLE ── */
+.table-area { flex: 1; overflow-y: auto; padding: 12px 16px; }
+table { width: 100%; border-collapse: collapse; background: var(--surface); border-radius: 10px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+thead th {
+  background: #f1f5f9; color: #334155; font-size: 11px; font-weight: 700;
+  padding: 9px 12px; text-align: left; border-bottom: 2px solid var(--border);
+  position: sticky; top: 0; z-index: 2; user-select: none;
+}
+th.col-cb { width: 32px; }
+th.col-front { width: 30%; }
+th.col-back  { width: 38%; }
+th.col-tags  { width: 16%; }
+th.col-due   { width: 10%; }
+th.col-act   { width: 50px; text-align: center; }
+
+tbody tr { border-bottom: 1px solid #f1f5f9; transition: background .1s; cursor: pointer; }
+tbody tr:last-child { border-bottom: none; }
+tbody tr:hover { background: #f8fafc; }
+tbody tr.selected-row { background: #dbeafe !important; }
+tbody td { padding: 9px 12px; font-size: 13px; vertical-align: top; }
+td.col-cb { vertical-align: middle; }
+td.col-front { font-weight: 600; }
+td.truncated { max-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+td.col-tags  { font-size: 11px; color: var(--muted); }
+td.col-due .due-badge {
+  display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 8px;
+}
+.due-new      { background: #dbeafe; color: #1d4ed8; }
+.due-today    { background: #dcfce7; color: #16a34a; }
+.due-overdue  { background: #fee2e2; color: var(--danger); }
+.due-learning { background: #fef3c7; color: #d97706; }
+.due-future   { background: #f1f5f9; color: #64748b; }
+.row-check { width: 14px; height: 14px; cursor: pointer; accent-color: var(--accent); }
+.edit-btn {
+  background: none; border: 1px solid var(--border); border-radius: 5px;
+  padding: 3px 7px; font-size: 11px; cursor: pointer; color: #555;
+}
+.edit-btn:hover { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
+
+.empty-state { text-align: center; padding: 60px 20px; color: var(--muted); font-size: 14px; }
+.loading { text-align: center; padding: 40px; color: var(--muted); font-size: 13px; }
+
+/* ── STATUS BAR ── */
+.statusbar {
+  height: 26px; background: var(--surface); border-top: 1px solid var(--border);
+  padding: 0 16px; display: flex; align-items: center;
+  font-size: 11px; color: var(--muted); gap: 12px; flex-shrink: 0;
+}
+.status-ok  { color: var(--success); font-weight: 600; }
+.status-err { color: var(--danger);  font-weight: 600; }
+
+/* ── MODAL ── */
+.overlay {
+  display: none; position: fixed; inset: 0; z-index: 100;
+  background: rgba(0,0,0,.55); align-items: center; justify-content: center;
+}
+.overlay.open { display: flex; }
+.modal {
+  background: var(--surface); border-radius: 14px; width: 95%; max-width: 580px;
+  max-height: 90vh; display: flex; flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0,0,0,.3);
+}
+.modal-header {
+  padding: 16px 20px 12px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.modal-header h2 { font-size: 15px; font-weight: 700; }
+.modal-close { background: none; border: none; font-size: 20px; cursor: pointer; color: var(--muted); line-height: 1; padding: 2px 6px; }
+.modal-close:hover { color: var(--text); }
+.modal-body { padding: 16px 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+.modal-footer { padding: 12px 20px; border-top: 1px solid var(--border); display: flex; gap: 8px; justify-content: flex-end; }
+
+.field-group { display: flex; flex-direction: column; gap: 4px; }
+.field-group label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); }
+.field-group input, .field-group textarea, .field-group select {
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px;
+  font-family: inherit; font-size: 13px; color: var(--text);
+  transition: border-color .15s;
+}
+.field-group input:focus, .field-group textarea:focus, .field-group select:focus { outline: none; border-color: var(--accent); }
+.field-group textarea { resize: vertical; min-height: 80px; }
+
+/* dynamic extra fields */
+.extra-fields { display: flex; flex-direction: column; gap: 10px; }
+
+/* ── CONFIRM DIALOG ── */
+.confirm-overlay { display: none; position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,.6); align-items: center; justify-content: center; }
+.confirm-overlay.open { display: flex; }
+.confirm-box { background: var(--surface); border-radius: 12px; padding: 24px 28px; max-width: 360px; width: 90%; text-align: center; box-shadow: 0 10px 40px rgba(0,0,0,.25); }
+.confirm-box h3 { font-size: 16px; margin-bottom: 8px; }
+.confirm-box p  { font-size: 13px; color: var(--muted); margin-bottom: 20px; }
+.confirm-box .btn-row { display: flex; gap: 10px; justify-content: center; }
+</style>
+</head>
+<body>
+
+<!-- ── TOP BAR ── -->
+<div class="topbar">
+  <h1>Anki Manager</h1>
+  <input type="text" id="searchInput" placeholder="Search notes (Anki syntax: tag:foo, deck:name, front:*word*…)" onkeydown="if(event.key==='Enter') searchNotes()">
+  <button class="btn primary" onclick="searchNotes()">Search</button>
+  <button class="btn outline" onclick="refreshAll()">↺ Refresh</button>
+</div>
+
+<div class="layout">
+
+  <!-- ── SIDEBAR ── -->
+  <div class="sidebar">
+    <div class="sidebar-header">
+      Decks
+      <button class="btn sm outline" onclick="promptNewDeck()" title="New deck">+</button>
+    </div>
+    <div class="sidebar-list" id="deckList">
+      <div class="loading">Loading decks…</div>
+    </div>
+  </div>
+
+  <!-- ── MAIN ── -->
+  <div class="main">
+    <div class="toolbar">
+      <span class="deck-title" id="deckTitle">All cards</span>
+      <span class="count-pill" id="countPill">0 notes</span>
+      <div class="spacer"></div>
+      <button class="btn outline sm" id="deleteSelBtn" onclick="deleteSelected()" disabled>Delete selected</button>
+      <button class="btn outline sm" onclick="exportCsv()">⬇ Export CSV</button>
+      <button class="btn primary" onclick="openAddModal()">+ New card</button>
+    </div>
+
+    <div class="table-area">
+      <table>
+        <thead>
+          <tr>
+            <th class="col-cb"><input type="checkbox" id="selectAll" onchange="toggleSelectAll(this)" style="width:14px;height:14px;accent-color:var(--accent)"></th>
+            <th class="col-front">Front</th>
+            <th class="col-back">Back</th>
+            <th class="col-tags">Tags</th>
+            <th class="col-due">Due</th>
+            <th class="col-act"></th>
+          </tr>
+        </thead>
+        <tbody id="cardsBody">
+          <tr><td colspan="6" class="empty-state">Select a deck or search to view cards.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ── STATUS BAR ── -->
+<div class="statusbar">
+  <span id="statusMsg">Ready — Anki must be open with AnkiConnect installed.</span>
+  <span id="connStatus"></span>
+</div>
+
+<!-- ── ADD / EDIT MODAL ── -->
+<div class="overlay" id="cardOverlay" onclick="if(event.target===this)closeCardModal()">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="modalTitle">New Card</h2>
+      <button class="modal-close" onclick="closeCardModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="field-group">
+        <label>Deck</label>
+        <select id="modalDeck" onchange="onModalDeckChange()"></select>
+      </div>
+      <div class="field-group">
+        <label>Note type</label>
+        <select id="modalModel" onchange="onModelChange()"></select>
+      </div>
+      <div class="extra-fields" id="extraFields"></div>
+      <div class="field-group">
+        <label>Tags (space-separated)</label>
+        <input type="text" id="modalTags" placeholder="e.g. vocab google-it">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn danger sm" id="modalDeleteBtn" onclick="deleteCurrentNote()" style="margin-right:auto;display:none">Delete</button>
+      <button class="btn outline" onclick="closeCardModal()">Cancel</button>
+      <button class="btn primary" id="modalSaveBtn" onclick="saveCard()">Add card</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── CONFIRM ── -->
+<div class="confirm-overlay" id="confirmOverlay">
+  <div class="confirm-box">
+    <h3 id="confirmTitle">Delete cards?</h3>
+    <p id="confirmMsg"></p>
+    <div class="btn-row">
+      <button class="btn outline" onclick="closeConfirm()">Cancel</button>
+      <button class="btn danger" id="confirmOkBtn">Delete</button>
+    </div>
+  </div>
+</div>
+
+<script>
+var ANKI = 'http://localhost:8765';
+
+// ── STATE ──────────────────────────────────────────────────────────────────────
+var allDecks    = {};   // name -> id
+var currentDeck = '';
+var currentNotes = [];  // [{noteId, front, back, tags, due, model, fields}]
+var selectedIds  = new Set();
+var editingNoteId = null;
+var modelFieldsCache = {}; // model -> [fieldNames]
+var confirmCallback = null;
+
+// ── ANKI API ───────────────────────────────────────────────────────────────────
+function anki(action, params) {
+  return fetch(ANKI, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: action, version: 6, params: params || {} })
+  })
+  .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+  .then(function(r) { if (r.error) throw new Error(r.error); return r.result; });
+}
+
+function setStatus(msg, type) {
+  var el = document.getElementById('statusMsg');
+  el.textContent = msg;
+  el.className = type === 'ok' ? 'status-ok' : type === 'err' ? 'status-err' : '';
+}
+
+// ── INIT ───────────────────────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', function() {
+  refreshAll();
+});
+
+function refreshAll() {
+  setStatus('Connecting to Anki…');
+  anki('version')
+    .then(function(v) {
+      setStatus('Connected — AnkiConnect v' + v, 'ok');
+      return loadDecks();
+    })
+    .catch(function() {
+      setStatus('Cannot reach Anki. Make sure Anki is open and AnkiConnect is installed.', 'err');
+      document.getElementById('deckList').innerHTML = '<div class="loading" style="color:#dc2626">Not connected</div>';
+    });
+  loadModels();
+}
+
+// ── DECKS ──────────────────────────────────────────────────────────────────────
+function loadDecks() {
+  return Promise.all([
+    anki('deckNamesAndIds'),
+    anki('getDeckStats', { decks: ['*'] }).catch(function() { return {}; })
+  ]).then(function(res) {
+    allDecks = res[0];
+    var stats = res[1] || {};
+    renderDeckList(allDecks, stats);
+    populateModalDecks();
+  });
+}
+
+function renderDeckList(decks, stats) {
+  var names = Object.keys(decks).sort();
+  var html = '';
+  names.forEach(function(name) {
+    var depth = (name.match(/::/g) || []).length;
+    var cls = 'deck-item' + (depth === 1 ? ' child' : depth >= 2 ? ' grandchild' : '') + (name === currentDeck ? ' active' : '');
+    var label = depth === 0 ? name : name.split('::').pop();
+    var id = decks[name];
+    var s = stats[id];
+    var total = s ? (s.total_in_deck || 0) : '';
+    html += '<div class="' + cls + '" data-deck="' + escH(name) + '">';
+    html += '<span class="deck-name" title="' + escH(name) + '">' + escH(label) + '</span>';
+    if (total !== '') html += '<span class="deck-count">' + total + '</span>';
+    html += '</div>';
+  });
+  document.getElementById('deckList').innerHTML = html || '<div class="loading">No decks found</div>';
+
+  // Event delegation — no inline onclick so deck names with quotes/special chars are safe
+  document.getElementById('deckList').addEventListener('click', function(e) {
+    var item = e.target.closest('[data-deck]');
+    if (item) loadDeck(item.getAttribute('data-deck'));
+  });
+}
+
+function loadDeck(deckName) {
+  currentDeck = deckName;
+  selectedIds.clear();
+  document.getElementById('deckTitle').textContent = deckName;
+  document.getElementById('selectAll').checked = false;
+  updateDeleteBtn();
+
+  // Re-highlight sidebar
+  document.querySelectorAll('.deck-item').forEach(function(el) {
+    el.classList.toggle('active', el.querySelector('.deck-name').title === deckName);
+  });
+
+  setStatus('Loading cards in "' + deckName + '"…');
+  document.getElementById('cardsBody').innerHTML = '<tr><td colspan="6" class="loading">Loading…</td></tr>';
+
+  var query = 'deck:"' + deckName + '"';
+  console.log('[anki] findNotes query:', query);
+
+  anki('findNotes', { query: query })
+    .then(function(ids) {
+      console.log('[anki] findNotes returned', ids.length, 'ids:', ids.slice(0, 5));
+      if (!ids.length) {
+        document.getElementById('cardsBody').innerHTML = '<tr><td colspan="6" class="empty-state">No cards in this deck.</td></tr>';
+        document.getElementById('countPill').textContent = '0 notes';
+        setStatus('Deck is empty.', 'ok');
+        return;
+      }
+      var limited = ids.slice(0, 500);
+      console.log('[anki] calling notesInfo with', limited.length, 'ids');
+      return anki('notesInfo', { notes: limited });
+    })
+    .then(function(notes) {
+      if (!notes) return;
+      console.log('[anki] notesInfo returned', notes.length, 'notes, first:', notes[0]);
+      currentNotes = notes;
+      renderCards(notes);
+      document.getElementById('countPill').textContent = notes.length + ' note' + (notes.length !== 1 ? 's' : '');
+      setStatus('Loaded ' + notes.length + ' notes from "' + deckName + '"', 'ok');
+      enrichWithCardInfo(notes).then(function() { renderCards(notes); }).catch(function(e) {
+        console.warn('[anki] enrichWithCardInfo failed (non-fatal):', e.message);
+      });
+    })
+    .catch(function(e) {
+      console.error('[anki] loadDeck error:', e);
+      setStatus('Error loading deck: ' + e.message, 'err');
+    });
+}
+
+function enrichWithCardInfo(notes) {
+  // Get card IDs to find due info
+  var noteIds = notes.map(function(n) { return n.noteId; });
+  return anki('findCards', { query: 'nid:' + noteIds.join(',') })
+    .then(function(cardIds) {
+      if (!cardIds || !cardIds.length) return notes;
+      return anki('cardsInfo', { cards: cardIds.slice(0, 500) })
+        .then(function(cardInfos) {
+          var noteCardMap = {};
+          cardInfos.forEach(function(c) { noteCardMap[c.note] = c; });
+          notes.forEach(function(n) {
+            var card = noteCardMap[n.noteId];
+            n.dueInfo = card ? getDueLabel(card) : null;
+          });
+          return notes;
+        });
+    })
+    .catch(function() { return notes; });
+}
+
+function getDueLabel(card) {
+  var q = card.queue;
+  // queue: -1=suspended, 0=new, 1=learning, 2=review, 3=day-learning
+  if (q === -1) return { label: 'Suspended', cls: 'due-future' };
+  if (q === 0)  return { label: 'New', cls: 'due-new' };
+  if (q === 1 || q === 3) return { label: 'Learning', cls: 'due-learning' };
+  if (q === 2) {
+    var now = Math.floor(Date.now() / 1000 / 86400); // days since epoch
+    var due = card.due;
+    if (due <= now) return { label: 'Due', cls: 'due-today' };
+    var diff = due - now;
+    return { label: 'In ' + diff + 'd', cls: 'due-future' };
+  }
+  return { label: '—', cls: 'due-future' };
+}
+
+function renderCards(notes) {
+  if (!notes.length) {
+    document.getElementById('cardsBody').innerHTML = '<tr><td colspan="6" class="empty-state">No cards found.</td></tr>';
+    return;
+  }
+  var html = '';
+  notes.forEach(function(n) {
+    var fields = n.fields || {};
+    var fieldNames = Object.keys(fields);
+    var front = fieldNames[0] ? stripHtml(fields[fieldNames[0]].value) : '';
+    var back  = fieldNames[1] ? stripHtml(fields[fieldNames[1]].value) : '';
+    var tags  = (n.tags || []).join(' ');
+    var due   = n.dueInfo ? '<span class="due-badge ' + n.dueInfo.cls + '">' + n.dueInfo.label + '</span>' : '';
+    var sel   = selectedIds.has(n.noteId);
+    html += '<tr class="' + (sel ? 'selected-row' : '') + '" onclick="onRowClick(event,' + n.noteId + ')">';
+    html += '<td class="col-cb" onclick="event.stopPropagation()"><input type="checkbox" class="row-check" data-id="' + n.noteId + '"' + (sel ? ' checked' : '') + ' onchange="onCheckChange(this,' + n.noteId + ')"></td>';
+    html += '<td class="col-front truncated" title="' + escH(front) + '">' + escH(front) + '</td>';
+    html += '<td class="col-back  truncated" title="' + escH(back)  + '">' + escH(back)  + '</td>';
+    html += '<td class="col-tags  truncated" title="' + escH(tags)  + '">' + escH(tags)  + '</td>';
+    html += '<td class="col-due">' + due + '</td>';
+    html += '<td class="col-act" onclick="event.stopPropagation()"><button class="edit-btn" onclick="openEditModal(' + n.noteId + ')">Edit</button></td>';
+    html += '</tr>';
+  });
+  document.getElementById('cardsBody').innerHTML = html;
+}
+
+// ── SEARCH ─────────────────────────────────────────────────────────────────────
+function searchNotes() {
+  var q = document.getElementById('searchInput').value.trim();
+  if (!q) return;
+  currentDeck = '';
+  document.getElementById('deckTitle').textContent = 'Search: ' + q;
+  selectedIds.clear(); updateDeleteBtn();
+  document.getElementById('cardsBody').innerHTML = '<tr><td colspan="6" class="loading">Searching…</td></tr>';
+  setStatus('Searching…');
+
+  anki('findNotes', { query: q })
+    .then(function(ids) {
+      if (!ids.length) {
+        document.getElementById('cardsBody').innerHTML = '<tr><td colspan="6" class="empty-state">No results.</td></tr>';
+        document.getElementById('countPill').textContent = '0 notes';
+        setStatus('No results for: ' + q);
+        return;
+      }
+      return anki('notesInfo', { notes: ids.slice(0, 500) });
+    })
+    .then(function(notes) {
+      if (!notes) return;
+      currentNotes = notes;
+      renderCards(notes);
+      document.getElementById('countPill').textContent = notes.length + ' note' + (notes.length !== 1 ? 's' : '');
+      setStatus('Found ' + notes.length + ' notes', 'ok');
+    })
+    .catch(function(e) { setStatus('Search error: ' + e.message, 'err'); });
+}
+
+// ── SELECTION ──────────────────────────────────────────────────────────────────
+function onRowClick(e, id) {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON') return;
+  openEditModal(id);
+}
+
+function onCheckChange(cb, id) {
+  if (cb.checked) { selectedIds.add(id); } else { selectedIds.delete(id); }
+  cb.closest('tr').classList.toggle('selected-row', cb.checked);
+  updateDeleteBtn();
+}
+
+function toggleSelectAll(masterCb) {
+  document.querySelectorAll('.row-check').forEach(function(cb) {
+    var id = parseInt(cb.getAttribute('data-id'), 10);
+    cb.checked = masterCb.checked;
+    masterCb.checked ? selectedIds.add(id) : selectedIds.delete(id);
+    cb.closest('tr').classList.toggle('selected-row', masterCb.checked);
+  });
+  updateDeleteBtn();
+}
+
+function updateDeleteBtn() {
+  var btn = document.getElementById('deleteSelBtn');
+  btn.disabled = selectedIds.size === 0;
+  btn.textContent = selectedIds.size > 0 ? 'Delete ' + selectedIds.size + ' selected' : 'Delete selected';
+}
+
+// ── ADD / EDIT MODAL ───────────────────────────────────────────────────────────
+var allModels = [];
+
+function loadModels() {
+  anki('modelNames').then(function(names) {
+    allModels = names.sort();
+    populateModalModels();
+  }).catch(function() {});
+}
+
+function populateModalDecks() {
+  var sel = document.getElementById('modalDeck');
+  sel.innerHTML = '';
+  Object.keys(allDecks).sort().forEach(function(name) {
+    var opt = document.createElement('option');
+    opt.value = name; opt.textContent = name;
+    if (name === currentDeck) opt.selected = true;
+    sel.appendChild(opt);
+  });
+}
+
+function populateModalModels() {
+  var sel = document.getElementById('modalModel');
+  sel.innerHTML = '';
+  allModels.forEach(function(m) {
+    var opt = document.createElement('option');
+    opt.value = m; opt.textContent = m;
+    sel.appendChild(opt);
+  });
+}
+
+function onModalDeckChange() { /* deck selection, no extra action needed */ }
+
+function onModelChange() {
+  var model = document.getElementById('modalModel').value;
+  loadModelFields(model).then(function(fields) { renderExtraFields(fields, {}); });
+}
+
+function loadModelFields(model) {
+  if (modelFieldsCache[model]) return Promise.resolve(modelFieldsCache[model]);
+  return anki('modelFieldNames', { modelName: model }).then(function(fields) {
+    modelFieldsCache[model] = fields;
+    return fields;
+  });
+}
+
+function renderExtraFields(fieldNames, values) {
+  var html = '';
+  fieldNames.forEach(function(f) {
+    html += '<div class="field-group">';
+    html += '<label>' + escH(f) + '</label>';
+    var val = values[f] ? stripHtml(values[f].value) : '';
+    html += '<textarea data-field="' + escH(f) + '" rows="3">' + escH(val) + '</textarea>';
+    html += '</div>';
+  });
+  document.getElementById('extraFields').innerHTML = html;
+}
+
+function openAddModal() {
+  editingNoteId = null;
+  document.getElementById('modalTitle').textContent = 'New Card';
+  document.getElementById('modalSaveBtn').textContent = 'Add card';
+  document.getElementById('modalDeleteBtn').style.display = 'none';
+  document.getElementById('modalTags').value = '';
+  populateModalDecks();
+  populateModalModels();
+  var model = document.getElementById('modalModel').value;
+  loadModelFields(model).then(function(fields) { renderExtraFields(fields, {}); });
+  document.getElementById('cardOverlay').classList.add('open');
+}
+
+function openEditModal(noteId) {
+  var note = currentNotes.find(function(n) { return n.noteId === noteId; });
+  if (!note) return;
+  editingNoteId = noteId;
+  document.getElementById('modalTitle').textContent = 'Edit Card';
+  document.getElementById('modalSaveBtn').textContent = 'Save changes';
+  document.getElementById('modalDeleteBtn').style.display = '';
+  document.getElementById('modalTags').value = (note.tags || []).join(' ');
+  populateModalDecks();
+  // Set model
+  var modelSel = document.getElementById('modalModel');
+  populateModalModels();
+  modelSel.value = note.modelName || allModels[0];
+  loadModelFields(note.modelName || allModels[0]).then(function(fields) {
+    renderExtraFields(fields, note.fields || {});
+  });
+  document.getElementById('cardOverlay').classList.add('open');
+}
+
+function closeCardModal() { document.getElementById('cardOverlay').classList.remove('open'); }
+
+function saveCard() {
+  var deck  = document.getElementById('modalDeck').value;
+  var model = document.getElementById('modalModel').value;
+  var tags  = document.getElementById('modalTags').value.trim().split(/\s+/).filter(Boolean);
+  var fields = {};
+  document.querySelectorAll('#extraFields [data-field]').forEach(function(el) {
+    fields[el.getAttribute('data-field')] = el.value;
+  });
+
+  if (editingNoteId) {
+    // Update existing
+    Promise.all([
+      anki('updateNoteFields', { note: { id: editingNoteId, fields: fields } }),
+      anki('updateNoteTags',   { note: editingNoteId, tags: tags.join(' ') })
+    ])
+    .then(function() {
+      setStatus('Card updated.', 'ok');
+      closeCardModal();
+      if (currentDeck) loadDeck(currentDeck); else searchNotes();
+    })
+    .catch(function(e) { setStatus('Update failed: ' + e.message, 'err'); });
+  } else {
+    // Create new
+    anki('addNote', { note: {
+      deckName: deck, modelName: model, fields: fields,
+      options: { allowDuplicate: false }, tags: tags
+    }})
+    .then(function() {
+      setStatus('Card added.', 'ok');
+      closeCardModal();
+      if (currentDeck) loadDeck(currentDeck);
+    })
+    .catch(function(e) { setStatus('Add failed: ' + e.message, 'err'); });
+  }
+}
+
+// ── DELETE ─────────────────────────────────────────────────────────────────────
+function deleteCurrentNote() {
+  showConfirm('Delete this card?', 'This cannot be undone.', function() {
+    anki('deleteNotes', { notes: [editingNoteId] })
+      .then(function() {
+        setStatus('Card deleted.', 'ok');
+        closeCardModal();
+        if (currentDeck) loadDeck(currentDeck); else searchNotes();
+      })
+      .catch(function(e) { setStatus('Delete failed: ' + e.message, 'err'); });
+  });
+}
+
+function deleteSelected() {
+  if (!selectedIds.size) return;
+  var ids = Array.from(selectedIds);
+  showConfirm('Delete ' + ids.length + ' card' + (ids.length > 1 ? 's' : '') + '?', 'This cannot be undone.', function() {
+    anki('deleteNotes', { notes: ids })
+      .then(function() {
+        setStatus(ids.length + ' card(s) deleted.', 'ok');
+        selectedIds.clear(); updateDeleteBtn();
+        if (currentDeck) loadDeck(currentDeck); else searchNotes();
+      })
+      .catch(function(e) { setStatus('Delete failed: ' + e.message, 'err'); });
+  });
+}
+
+// ── NEW DECK ───────────────────────────────────────────────────────────────────
+function promptNewDeck() {
+  var name = prompt('New deck name (use :: for sub-decks, e.g. Claude::Vocab):');
+  if (!name || !name.trim()) return;
+  anki('createDeck', { deck: name.trim() })
+    .then(function() { setStatus('Deck "' + name + '" created.', 'ok'); return loadDecks(); })
+    .catch(function(e) { setStatus('Error: ' + e.message, 'err'); });
+}
+
+// ── CONFIRM ────────────────────────────────────────────────────────────────────
+function showConfirm(title, msg, cb) {
+  document.getElementById('confirmTitle').textContent = title;
+  document.getElementById('confirmMsg').textContent   = msg;
+  document.getElementById('confirmOverlay').classList.add('open');
+  confirmCallback = cb;
+  document.getElementById('confirmOkBtn').onclick = function() { closeConfirm(); cb(); };
+}
+function closeConfirm() { document.getElementById('confirmOverlay').classList.remove('open'); }
+
+// ── EXPORT CSV ────────────────────────────────────────────────────────────────
+function exportCsv() {
+  if (!currentNotes.length) { alert('No cards loaded.'); return; }
+
+  function csvEsc(s) {
+    s = String(s || '');
+    return (s.indexOf(',') >= 0 || s.indexOf('"') >= 0 || s.indexOf('\n') >= 0)
+      ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+
+  // Export selected rows if any, otherwise all
+  var rows = selectedIds.size > 0
+    ? currentNotes.filter(function(n) { return selectedIds.has(n.noteId); })
+    : currentNotes;
+
+  // Collect all field names in order from the first note that has fields
+  var allFieldNames = [];
+  for (var i = 0; i < rows.length; i++) {
+    var keys = Object.keys(rows[i].fields || {});
+    if (keys.length) { allFieldNames = keys; break; }
+  }
+
+  // Header: all field names + Tags
+  var lines = [allFieldNames.concat(['Tags']).map(csvEsc).join(',')];
+
+  rows.forEach(function(n) {
+    var fields = n.fields || {};
+    var cells = allFieldNames.map(function(f) {
+      return fields[f] ? stripHtml(fields[f].value) : '';
+    });
+    cells.push((n.tags || []).join(' '));
+    lines.push(cells.map(csvEsc).join(','));
+  });
+
+  var blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  var url  = URL.createObjectURL(blob);
+  var a    = document.createElement('a');
+  var now  = new Date();
+  var pad  = function(x) { return x < 10 ? '0' + x : '' + x; };
+  var deck = currentDeck || 'anki-export';
+  a.href     = url;
+  a.download = deck.replace(/[^a-z0-9_-]/gi, '_') + '_' + now.getFullYear() + '-' + pad(now.getMonth()+1) + '-' + pad(now.getDate()) + '.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  setStatus('Exported ' + rows.length + ' cards (' + allFieldNames.length + ' fields) as CSV.', 'ok');
+}
+
+// ── UTILS ──────────────────────────────────────────────────────────────────────
+function escH(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function stripHtml(s) {
+  var d = document.createElement('div'); d.innerHTML = s || ''; return d.textContent;
+}
+
+// Keyboard shortcuts
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') { closeCardModal(); closeConfirm(); }
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+    e.preventDefault(); document.getElementById('searchInput').focus();
+  }
+});
+</script>
+</body>
+</html>
