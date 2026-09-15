@@ -1391,18 +1391,49 @@ function doImport() {
 
   var btn = document.getElementById('importDoBtn');
   btn.disabled = true;
-  btn.textContent = 'Importing…';
-  setStatus('Importing ' + notes.length + ' cards into "' + deck + '"…');
+  btn.textContent = 'Checking…';
+  setStatus('Checking ' + notes.length + ' card(s) for duplicates…');
 
-  anki('addNotes', { notes: notes })
-    .then(function(results) {
-      var added = results.filter(function(id) { return id !== null; }).length;
-      var dupes = results.length - added;
-      var msg = 'Imported ' + added + ' card' + (added !== 1 ? 's' : '') + ' into "' + deck + '"';
-      if (dupes) msg += ' (' + dupes + ' duplicate' + (dupes !== 1 ? 's' : '') + ' skipped)';
-      setStatus(msg, 'ok');
-      closeImportModal();
-      if (currentDeck === deck) loadDeck(deck);
+  // Preflight with canAddNotesWithErrorDetail so we know *which* cards are
+  // duplicates (and why) before importing, instead of AnkiConnect bulk-failing
+  // addNotes with one generic "cannot create note" message repeated N times.
+  anki('canAddNotesWithErrorDetail', { notes: notes })
+    .then(function(checks) {
+      var addable = [];
+      var skipped = [];
+      checks.forEach(function(chk, i) {
+        if (chk.canAdd) {
+          addable.push(notes[i]);
+        } else {
+          skipped.push({ front: importParsed[i].front, reason: chk.error });
+        }
+      });
+
+      if (skipped.length) {
+        console.log('[anki] skipped ' + skipped.length + ' duplicate/invalid card(s):');
+        skipped.forEach(function(s, i) {
+          console.log('  [' + (i + 1) + '] "' + s.front + '" — ' + s.reason);
+        });
+      }
+
+      if (!addable.length) {
+        setStatus('Nothing to import — all ' + skipped.length + ' card(s) were duplicates (see console for details).', 'err');
+        btn.disabled = false;
+        btn.textContent = 'Import ' + importParsed.length + ' cards';
+        return;
+      }
+
+      btn.textContent = 'Importing…';
+      setStatus('Importing ' + addable.length + ' card(s) into "' + deck + '"…');
+
+      return anki('addNotes', { notes: addable }).then(function(results) {
+        var added = results.filter(function(id) { return id !== null; }).length;
+        var msg = 'Imported ' + added + ' card' + (added !== 1 ? 's' : '') + ' into "' + deck + '"';
+        if (skipped.length) msg += ' (' + skipped.length + ' duplicate' + (skipped.length !== 1 ? 's' : '') + ' skipped — see console)';
+        setStatus(msg, 'ok');
+        closeImportModal();
+        if (currentDeck === deck) loadDeck(deck);
+      });
     })
     .catch(function(e) {
       setStatus('Import failed: ' + e.message, 'err');
