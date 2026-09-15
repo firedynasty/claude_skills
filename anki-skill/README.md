@@ -97,3 +97,12 @@ GET /api/supabase?action=cards&deck=xxx → cards for a deck (front, back)
 - `get_decks()` RPC avoids the 1000-row default limit when listing decks
 - Cards per deck are fetched up to 1000 (sufficient for most decks; increase `limit` in `api/supabase.js` if needed)
 - Local dev fallback: enter Supabase URL + key directly in the UI (stored in `localStorage`)
+
+---
+
+## `anki-manager.html` — Google Sheets import
+
+The Import CSV modal can sign in with Google, list your recent spreadsheets,
+and load a sheet's tab directly — same front=col1/back=rest-merged rule as
+pasting a CSV. Setup (Google Cloud Console OAuth client, `gsheet_bridge.py`),
+usage, and troubleshooting are all in **[`GOOGLE_SHEETS_IMPORT.md`](GOOGLE_SHEETS_IMPORT.md)**.

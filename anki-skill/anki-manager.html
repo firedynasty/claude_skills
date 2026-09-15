@@ -217,6 +217,21 @@ td.col-due .due-badge {
   transition: border-color .15s, background .15s;
 }
 .import-drop:hover, .import-drop.drag-over { border-color: var(--accent); background: var(--accent-bg); color: var(--accent); }
+
+/* ── GOOGLE SHEETS PICKER ── */
+.gsheet-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; position: relative; }
+.recent-dropdown-wrapper { position: relative; }
+.recent-dropdown {
+  position: absolute; top: calc(100% + 4px); left: 0; min-width: 220px; max-width: 320px;
+  max-height: 260px; overflow-y: auto; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.12); z-index: 50; padding: 4px;
+}
+.recent-dropdown-item {
+  display: block; width: 100%; text-align: left; background: none; border: none;
+  padding: 7px 10px; font-size: 12px; font-family: inherit; color: var(--text);
+  border-radius: 6px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.recent-dropdown-item:hover { background: var(--accent-bg); color: var(--accent); }
 .col-mode-row { display: flex; gap: 20px; margin-top: 4px; }
 .col-mode-row label { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: normal; text-transform: none; letter-spacing: 0; cursor: pointer; }
 .import-view-toggle { display: flex; gap: 0; margin-bottom: 6px; }
@@ -352,6 +367,20 @@ td.col-due .due-badge {
       <div class="field-group">
         <label>CSV format</label>
         <div style="font-size:11px;color:var(--muted)">Column 1 = Front (your target-language term — Chinese, Spanish, Hebrew, anything) &nbsp;·&nbsp; remaining columns merge into Back. Works for any number of columns.</div>
+      </div>
+      <div class="field-group">
+        <label>Or load from Google Sheets</label>
+        <div class="gsheet-row">
+          <button class="btn outline sm" id="gsheetAuthBtn" onclick="gsheetSignIn()">Sign in with Google</button>
+          <div class="recent-dropdown-wrapper">
+            <button class="btn outline sm" id="gsheetRecentBtn" disabled onclick="toggleGsheetRecent()">Recent &#9662;</button>
+            <div class="recent-dropdown" id="gsheetRecentDropdown" hidden></div>
+          </div>
+        </div>
+        <select id="sheetSelect" disabled onchange="onGsheetSheetSelect()" style="margin-top:6px">
+          <option value="">Sign in first</option>
+        </select>
+        <div id="gsheetHint" style="font-size:11px;color:var(--muted);margin-top:4px">Reads any spreadsheet you can open in Drive — picking a sheet fills the paste box below, same front/back rule applies.</div>
       </div>
       <div class="field-group">
         <label>Destination deck</label>
@@ -936,6 +965,176 @@ function renderCardGrid(notes) {
   document.getElementById('cardGrid').innerHTML = html;
 }
 
+// ── GOOGLE SHEETS PICKER ────────────────────────────────────────────────────
+// Talks to a local Python bridge (gsheet_bridge.py) that does Google's
+// Desktop-app OAuth flow — the same client type live_transcribe's Streamlit
+// app uses (google-auth-oauthlib's InstalledAppFlow + run_local_server) —
+// and serves the sheet data over localhost. No browser-side Google SDK, no
+// "Web application" OAuth client or JS-origin setup, and it works even
+// opening this file directly via file://. Start it with:
+//   python3 gsheet_bridge.py
+var GSHEET_BRIDGE_URL = 'http://localhost:8787';
+var gsheetSignedIn = false;
+var gsheetCurrentFileId = null;
+var _gsheetDismissListener = null;
+
+function gsheetFetch(path) {
+  return fetch(GSHEET_BRIDGE_URL + path).catch(function() {
+    throw new Error('Bridge not running — start it with: python3 gsheet_bridge.py');
+  });
+}
+
+function gsheetApiJson(path) {
+  return gsheetFetch(path).then(function(r) {
+    return r.json().then(function(body) {
+      if (!r.ok) throw new Error(body.error || ('HTTP ' + r.status));
+      return body;
+    });
+  });
+}
+
+function gsheetApiText(path) {
+  return gsheetFetch(path).then(function(r) {
+    if (!r.ok) {
+      return r.json()
+        .then(function(body) { throw new Error(body.error || ('HTTP ' + r.status)); })
+        .catch(function(e) { throw new Error(e.message || ('HTTP ' + r.status)); });
+    }
+    return r.text();
+  });
+}
+
+function refreshGsheetAuthUI() {
+  gsheetApiJson('/status')
+    .then(function(s) {
+      gsheetSignedIn = !!s.signedIn;
+      document.getElementById('gsheetAuthBtn').textContent = gsheetSignedIn ? 'Sign out' : 'Sign in with Google';
+      document.getElementById('gsheetRecentBtn').disabled = !gsheetSignedIn;
+    })
+    .catch(function() {
+      gsheetSignedIn = false;
+      document.getElementById('gsheetAuthBtn').textContent = 'Sign in with Google';
+      document.getElementById('gsheetRecentBtn').disabled = true;
+    });
+}
+
+function gsheetSignIn() {
+  var btn = document.getElementById('gsheetAuthBtn');
+  if (gsheetSignedIn) {
+    gsheetApiJson('/signout')
+      .then(function() {
+        gsheetSignedIn = false;
+        gsheetCurrentFileId = null;
+        closeGsheetRecent();
+        btn.textContent = 'Sign in with Google';
+        document.getElementById('gsheetRecentBtn').disabled = true;
+        var sel = document.getElementById('sheetSelect');
+        sel.innerHTML = '<option value="">Sign in first</option>';
+        sel.disabled = true;
+        setStatus('Signed out of Google.', 'ok');
+      })
+      .catch(function(e) { setStatus(e.message, 'err'); });
+    return;
+  }
+  btn.disabled = true;
+  setStatus('Opening Google sign-in in your browser… complete it there, then come back.');
+  gsheetApiJson('/signin')
+    .then(function() {
+      gsheetSignedIn = true;
+      btn.textContent = 'Sign out';
+      document.getElementById('gsheetRecentBtn').disabled = false;
+      setStatus('Signed in to Google. Click Recent to pick a spreadsheet.', 'ok');
+    })
+    .catch(function(e) { setStatus('Sign-in failed: ' + e.message, 'err'); })
+    .finally(function() { btn.disabled = false; });
+}
+
+function toggleGsheetRecent() {
+  var dd = document.getElementById('gsheetRecentDropdown');
+  if (!dd.hasAttribute('hidden')) { closeGsheetRecent(); } else { fetchRecentSheets(); }
+}
+
+function fetchRecentSheets() {
+  var btn = document.getElementById('gsheetRecentBtn');
+  btn.disabled = true;
+  btn.textContent = 'Loading…';
+  gsheetApiJson('/recent')
+    .then(function(data) { openGsheetRecent(data.files || []); })
+    .catch(function(e) { setStatus('Error fetching recent sheets: ' + e.message, 'err'); })
+    .finally(function() { btn.disabled = false; btn.textContent = 'Recent ▾'; });
+}
+
+function openGsheetRecent(files) {
+  var dd = document.getElementById('gsheetRecentDropdown');
+  dd.innerHTML = '';
+  if (!files.length) {
+    dd.innerHTML = '<div style="padding:10px 12px;font-size:12px;color:var(--muted)">No recent spreadsheets found</div>';
+  } else {
+    files.forEach(function(f) {
+      var item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'recent-dropdown-item';
+      item.textContent = f.name || '(untitled)';
+      item.onclick = function() { closeGsheetRecent(); loadGsheetWorkbook(f.id, f.name); };
+      dd.appendChild(item);
+    });
+  }
+  dd.removeAttribute('hidden');
+  if (!_gsheetDismissListener) {
+    _gsheetDismissListener = function(e) {
+      var dropdown = document.getElementById('gsheetRecentDropdown');
+      var btn = document.getElementById('gsheetRecentBtn');
+      if (dropdown && !dropdown.contains(e.target) && e.target !== btn) closeGsheetRecent();
+    };
+    setTimeout(function() { document.addEventListener('click', _gsheetDismissListener); }, 0);
+  }
+}
+
+function closeGsheetRecent() {
+  var dd = document.getElementById('gsheetRecentDropdown');
+  if (dd) dd.setAttribute('hidden', '');
+  if (_gsheetDismissListener) {
+    document.removeEventListener('click', _gsheetDismissListener);
+    _gsheetDismissListener = null;
+  }
+}
+
+function loadGsheetWorkbook(fileId, fileName) {
+  gsheetCurrentFileId = fileId;
+  setStatus('Loading "' + fileName + '"…');
+  gsheetApiJson('/workbook?id=' + encodeURIComponent(fileId))
+    .then(function(data) {
+      var sheets = data.sheets || [];
+      var sel = document.getElementById('sheetSelect');
+      sel.innerHTML = '<option value="">-- select sheet --</option>';
+      sheets.forEach(function(name) {
+        var opt = document.createElement('option');
+        opt.value = name; opt.textContent = name;
+        sel.appendChild(opt);
+      });
+      sel.disabled = false;
+      setStatus('Loaded "' + fileName + '" — ' + sheets.length + ' sheet(s). Pick a sheet above.', 'ok');
+      if (sheets.length === 1) {
+        sel.value = sheets[0];
+        onGsheetSheetSelect();
+      }
+    })
+    .catch(function(e) { setStatus('Error loading spreadsheet: ' + e.message, 'err'); });
+}
+
+function onGsheetSheetSelect() {
+  var name = document.getElementById('sheetSelect').value;
+  if (!name || !gsheetCurrentFileId) return;
+  setStatus('Loading sheet "' + name + '"…');
+  gsheetApiText('/workbook/csv?id=' + encodeURIComponent(gsheetCurrentFileId) + '&sheet=' + encodeURIComponent(name))
+    .then(function(csv) {
+      document.getElementById('importPasteArea').value = csv;
+      previewImport();
+      setStatus('Loaded sheet "' + name + '" — ' + importParsed.length + ' card(s) parsed.', 'ok');
+    })
+    .catch(function(e) { setStatus('Error loading sheet: ' + e.message, 'err'); });
+}
+
 // ── IMPORT CSV ────────────────────────────────────────────────────────────────
 var importParsed = []; // [{front, back}]
 
@@ -950,6 +1149,7 @@ function openImportModal() {
   importParsed = [];
   importViewMode = 'table';
   populateImportDecks();
+  refreshGsheetAuthUI();
   document.getElementById('importOverlay').classList.add('open');
 }
 

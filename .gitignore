@@ -6,9 +6,11 @@ Thumbs.db
 __pycache__/
 *.pyc
 
-# Env / secrets — never commit real Supabase keys etc.
+# Env / secrets — never commit real Supabase keys, OAuth client secrets, or tokens
 .env
 .env.*
+client_secret.json
+*_token.json
 
 # Personal vocab data (CSV imports) — keep local, not part of the public repo
 *.csv
