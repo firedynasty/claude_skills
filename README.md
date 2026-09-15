@@ -1,1 +1,1 @@
-# useful_skills
+# claude_skills

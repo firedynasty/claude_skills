@@ -1,0 +1,14 @@
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+
+# Env / secrets — never commit real Supabase keys etc.
+.env
+.env.*
+
+# Personal vocab data (CSV imports) — keep local, not part of the public repo
+*.csv

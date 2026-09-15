@@ -351,11 +351,7 @@ td.col-due .due-badge {
     <div class="modal-body">
       <div class="field-group">
         <label>CSV format</label>
-        <div class="col-mode-row">
-          <label><input type="radio" name="importColMode" value="2" onchange="onImportModeChange()"> 2 columns <span style="color:var(--muted);font-size:11px">(term, definition)</span></label>
-          <label><input type="radio" name="importColMode" value="3" checked onchange="onImportModeChange()"> 3 columns <span style="color:var(--muted);font-size:11px">(language, pronunciation, definition)</span></label>
-        </div>
-        <div id="importModeHint" style="font-size:11px;color:var(--muted);margin-top:5px">Front = definition &nbsp;·&nbsp; Back = language + pronunciation</div>
+        <div style="font-size:11px;color:var(--muted)">Column 1 = Front (your target-language term — Chinese, Spanish, Hebrew, anything) &nbsp;·&nbsp; remaining columns merge into Back. Works for any number of columns.</div>
       </div>
       <div class="field-group">
         <label>Destination deck</label>
@@ -972,17 +968,6 @@ function populateImportDecks() {
   });
 }
 
-function onImportModeChange() {
-  var mode = document.querySelector('input[name="importColMode"]:checked').value;
-  var hint = document.getElementById('importModeHint');
-  if (mode === '3') {
-    hint.textContent = 'Front = definition \u00a0·\u00a0 Back = language + pronunciation';
-  } else {
-    hint.textContent = 'Front = term \u00a0·\u00a0 Back = definition';
-  }
-  previewImport();
-}
-
 function parseCsvLine(line) {
   var result = [], cur = '', inQuote = false;
   for (var i = 0; i < line.length; i++) {
@@ -1007,9 +992,10 @@ function looksLikeHeader(cells) {
   });
 }
 
+// Column 1 is always the front (your target-language term, whatever the
+// language). Columns 2+ join with "\n", skipping blanks, to form the back.
+// Mirrors csv_to_cards.py so the same CSV behaves identically either way.
 function parseImportText(text) {
-  var modeEl = document.querySelector('input[name="importColMode"]:checked');
-  var mode = modeEl ? modeEl.value : '3';
   var lines = text.split(/\r?\n/).map(function(l) { return l.trim(); }).filter(Boolean);
   if (!lines.length) return [];
 
@@ -1020,38 +1006,17 @@ function parseImportText(text) {
   var cards = [];
   for (var i = start; i < lines.length; i++) {
     var cols = parseCsvLine(lines[i]);
-    if (mode === '3' && cols.length >= 3) {
-      var lang = cols[0], pron = cols[1], def = cols[2];
-      if (!def) continue;
-      cards.push({ front: def, back: lang + (pron ? '\n' + pron : '') });
-    } else if (mode === '2' && cols.length >= 2) {
-      if (!cols[0]) continue;
-      cards.push({ front: cols[0], back: cols[1] });
-    }
+    if (!cols.length || !cols[0]) continue;
+    var back = cols.slice(1).filter(Boolean).join('\n');
+    cards.push({ front: cols[0], back: back });
   }
   return cards;
-}
-
-function autoDetectMode(text) {
-  var lines = text.split(/\r?\n/).map(function(l) { return l.trim(); }).filter(Boolean);
-  if (!lines.length) return;
-  var start = 0;
-  if (looksLikeHeader(parseCsvLine(lines[0]))) start = 1;
-  var maxCols = 0;
-  for (var i = start; i < Math.min(start + 5, lines.length); i++) {
-    var c = parseCsvLine(lines[i]).length;
-    if (c > maxCols) maxCols = c;
-  }
-  var target = maxCols >= 3 ? '3' : '2';
-  var radio = document.querySelector('input[name="importColMode"][value="' + target + '"]');
-  if (radio && !radio.checked) { radio.checked = true; onImportModeChange(); }
 }
 
 function previewImport() {
   var text = document.getElementById('importPasteArea').value;
   if (!text.trim()) { importParsed = []; updateImportPreview(); return; }
   try {
-    autoDetectMode(text);
     importParsed = parseImportText(text);
   } catch(e) {
     importParsed = [];
@@ -1085,8 +1050,7 @@ function updateImportPreview() {
     return;
   }
 
-  var n    = importParsed.length;
-  var mode = (document.querySelector('input[name="importColMode"]:checked') || {}).value || '3';
+  var n = importParsed.length;
 
   // ── raw table view ──────────────────────────────────────────────────────
   // re-parse raw to get all columns for the table view
@@ -1102,15 +1066,14 @@ function updateImportPreview() {
   var LIMIT    = 8;
   var shown    = dataRows.slice(0, LIMIT);
 
-  // highlight cols used as front/back
-  var frontIdx, backIdxA, backIdxB;
-  if (mode === '3') { frontIdx = 2; backIdxA = 0; backIdxB = 1; }
-  else              { frontIdx = 0; backIdxA = 1; backIdxB = -1; }
+  // highlight cols used as front/back — column 0 is always front,
+  // every other column feeds back, regardless of how many there are.
+  var frontIdx = 0;
 
   var headHtml = '<tr>';
   headers.forEach(function(h, i) {
-    var cls = (i === frontIdx || i === backIdxA || i === backIdxB) ? ' class="col-highlight"' : '';
-    var badge = i === frontIdx ? ' ✦F' : (i === backIdxA || i === backIdxB) ? ' ✦B' : '';
+    var cls = ' class="col-highlight"';
+    var badge = i === frontIdx ? ' ✦F' : ' ✦B';
     headHtml += '<th' + cls + '>' + escH(h) + badge + '</th>';
   });
   headHtml += '</tr>';
@@ -1121,8 +1084,7 @@ function updateImportPreview() {
     bodyHtml += '<tr>';
     headers.forEach(function(_, i) {
       var val = row[i] !== undefined ? row[i] : '';
-      var cls = (i === frontIdx || i === backIdxA || i === backIdxB) ? ' class="col-highlight"' : '';
-      bodyHtml += '<td' + cls + ' title="' + escH(val) + '">' + escH(val) + '</td>';
+      bodyHtml += '<td class="col-highlight" title="' + escH(val) + '">' + escH(val) + '</td>';
     });
     bodyHtml += '</tr>';
   });
@@ -1135,10 +1097,13 @@ function updateImportPreview() {
   var cardsHtml = '';
   importParsed.slice(0, LIMIT).forEach(function(c, i) {
     var backLines = c.back.split('\n');
+    var backHtml = backLines.map(function(line, li) {
+      return li === 0 ? escH(line) : '<br><span style="color:var(--muted)">' + escH(line) + '</span>';
+    }).join('');
     cardsHtml += '<div class="import-card">';
     cardsHtml += '<div class="import-card-num">Card ' + (i + 1) + '</div>';
     cardsHtml += '<div class="import-card-row"><div class="import-card-label front-lbl">Front</div><div class="import-card-value">' + escH(c.front) + '</div></div>';
-    cardsHtml += '<div class="import-card-row"><div class="import-card-label back-lbl">Back</div><div class="import-card-value">' + escH(backLines[0]) + (backLines[1] ? '<br><span style="color:var(--muted)">' + escH(backLines[1]) + '</span>' : '') + '</div></div>';
+    cardsHtml += '<div class="import-card-row"><div class="import-card-label back-lbl">Back</div><div class="import-card-value">' + backHtml + '</div></div>';
     cardsHtml += '</div>';
   });
   if (importParsed.length > LIMIT) {
