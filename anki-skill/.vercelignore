@@ -1,0 +1,4 @@
+# Deploy only the static manager page — never secrets, tokens, CSVs or scripts
+/*
+!anki-manager.html
+!vercel.json
