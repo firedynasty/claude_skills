@@ -249,6 +249,14 @@ td.col-due .due-badge {
 /* card view */
 .import-cards-wrap { max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 4px 2px; }
 .import-card { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; font-size: 12px; }
+.preview-table tr.dup-row td { background: #fef2f2; color: var(--muted); text-decoration: line-through; font-weight: 400; }
+.import-card.dup-card { opacity: .5; border-color: #fecaca; }
+.dup-badge { display: inline-block; font-size: 9px; font-weight: 700; color: var(--danger); background: #fee2e2; border-radius: 4px; padding: 1px 5px; margin-left: 6px; text-decoration: none; vertical-align: middle; }
+.dup-bar { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-bottom: 6px; }
+.dup-bar label { display: flex; align-items: center; gap: 6px; font-weight: 600; cursor: pointer; text-transform: none; letter-spacing: 0; color: var(--text); }
+.dup-bar input { accent-color: var(--accent); width: 14px; height: 14px; }
+#importDupStatus { color: var(--muted); }
+#importDupStatus.has-dups { color: var(--danger); font-weight: 600; }
 .import-card-num { font-size: 10px; font-weight: 700; color: var(--muted); padding: 4px 10px; background: #f8fafc; border-bottom: 1px solid var(--border); }
 .import-card-row { display: flex; border-bottom: 1px solid #f1f5f9; }
 .import-card-row:last-child { border-bottom: none; }
@@ -385,7 +393,7 @@ td.col-due .due-badge {
       <div class="field-group">
         <label>Destination deck</label>
         <div style="display:flex;gap:6px;align-items:center">
-          <select id="importDeck" style="flex:1"></select>
+          <select id="importDeck" style="flex:1" onchange="checkImportDuplicates()"></select>
           <button class="btn outline sm" onclick="promptImportNewDeck()">+ New</button>
         </div>
       </div>
@@ -404,6 +412,10 @@ td.col-due .due-badge {
       </div>
       <div id="importPreviewWrap" style="display:none" class="field-group">
         <label id="importPreviewLabel">Preview</label>
+        <div class="dup-bar">
+          <label><input type="checkbox" id="importRemoveDups" checked onchange="updateImportPreview()"> Remove duplicates</label>
+          <span id="importDupStatus"></span>
+        </div>
         <div class="import-view-toggle">
           <button id="importBtnTable" class="active" onclick="setImportView('table')">Table</button>
           <button id="importBtnCards" onclick="setImportView('cards')">Cards</button>
@@ -1147,6 +1159,9 @@ function openImportModal() {
   document.getElementById('importCountLabel').textContent = '';
   document.getElementById('importDoBtn').disabled = true;
   importParsed = [];
+  importDupReasons = [];
+  importDupSeq++;
+  document.getElementById('importDupStatus').textContent = '';
   importViewMode = 'table';
   populateImportDecks();
   refreshGsheetAuthUI();
@@ -1222,7 +1237,71 @@ function previewImport() {
     importParsed = [];
     setStatus('CSV parse error: ' + e.message, 'err');
   }
+  importDupReasons = [];
   updateImportPreview();
+  clearTimeout(importDupTimer);
+  importDupTimer = setTimeout(checkImportDuplicates, 300);
+}
+
+// ── DUPLICATE DETECTION ──────────────────────────────────────────────────────
+// importDupReasons[i] is null (ok) or a short reason why importParsed[i] is a
+// duplicate: repeated earlier in the CSV, or already in the destination deck.
+var importDupReasons = [];
+var importDupTimer   = null;
+var importDupSeq     = 0;   // drops stale responses when the CSV/deck changes
+
+function buildImportNotes(deck, allowDuplicate) {
+  return importParsed.map(function(c) {
+    return {
+      deckName: deck,
+      modelName: 'Basic',
+      fields: { Front: c.front, Back: c.back },
+      options: { allowDuplicate: allowDuplicate, duplicateScope: 'deck' },
+      tags: []
+    };
+  });
+}
+
+function checkImportDuplicates() {
+  if (!importParsed.length) return;
+  var seq  = ++importDupSeq;
+  var deck = document.getElementById('importDeck').value;
+
+  var seen = {};
+  var reasons = importParsed.map(function(c) {
+    var key = c.front.trim();
+    if (seen[key]) return 'repeated in CSV';
+    seen[key] = true;
+    return null;
+  });
+
+  document.getElementById('importDupStatus').textContent = 'Checking for duplicates…';
+  anki('canAddNotesWithErrorDetail', { notes: buildImportNotes(deck, false) })
+    .then(function(checks) {
+      if (seq !== importDupSeq) return;
+      checks.forEach(function(chk, i) {
+        if (!chk.canAdd && !reasons[i]) {
+          reasons[i] = /duplicate/i.test(chk.error || '') ? 'already in deck' : (chk.error || 'cannot add');
+        }
+      });
+      importDupReasons = reasons;
+      updateImportPreview();
+    })
+    .catch(function(e) {
+      if (seq !== importDupSeq) return;
+      importDupReasons = reasons;  // still flag in-CSV repeats
+      updateImportPreview();
+      document.getElementById('importDupStatus').textContent = 'Could not check Anki for duplicates: ' + e.message;
+    });
+}
+
+function importKeptIndexes() {
+  var remove = document.getElementById('importRemoveDups').checked;
+  var keep = [];
+  importParsed.forEach(function(_, i) {
+    if (!remove || !importDupReasons[i]) keep.push(i);
+  });
+  return keep;
 }
 
 var importRawRows  = [];  // [{headers:[], rows:[[]]}] — raw parsed lines
@@ -1279,12 +1358,18 @@ function updateImportPreview() {
   headHtml += '</tr>';
   document.getElementById('importRawHead').innerHTML = headHtml;
 
+  // Map raw rows back to importParsed indexes (parseImportText skips rows with
+  // an empty first column) so duplicate flags line up with the table.
   var bodyHtml = '';
+  var pIdx = 0;
   shown.forEach(function(row) {
-    bodyHtml += '<tr>';
+    var dup = null;
+    if (row.length && row[0]) dup = importDupReasons[pIdx++] || null;
+    bodyHtml += '<tr' + (dup ? ' class="dup-row"' : '') + '>';
     headers.forEach(function(_, i) {
       var val = row[i] !== undefined ? row[i] : '';
-      bodyHtml += '<td class="col-highlight" title="' + escH(val) + '">' + escH(val) + '</td>';
+      var badge = (dup && i === 0) ? '<span class="dup-badge">DUP · ' + escH(dup) + '</span>' : '';
+      bodyHtml += '<td class="col-highlight" title="' + escH(val) + '">' + escH(val) + badge + '</td>';
     });
     bodyHtml += '</tr>';
   });
@@ -1300,8 +1385,9 @@ function updateImportPreview() {
     var backHtml = backLines.map(function(line, li) {
       return li === 0 ? escH(line) : '<br><span style="color:var(--muted)">' + escH(line) + '</span>';
     }).join('');
-    cardsHtml += '<div class="import-card">';
-    cardsHtml += '<div class="import-card-num">Card ' + (i + 1) + '</div>';
+    var dup = importDupReasons[i];
+    cardsHtml += '<div class="import-card' + (dup ? ' dup-card' : '') + '">';
+    cardsHtml += '<div class="import-card-num">Card ' + (i + 1) + (dup ? '<span class="dup-badge">DUP · ' + escH(dup) + '</span>' : '') + '</div>';
     cardsHtml += '<div class="import-card-row"><div class="import-card-label front-lbl">Front</div><div class="import-card-value">' + escH(c.front) + '</div></div>';
     cardsHtml += '<div class="import-card-row"><div class="import-card-label back-lbl">Back</div><div class="import-card-value">' + backHtml + '</div></div>';
     cardsHtml += '</div>';
@@ -1311,10 +1397,25 @@ function updateImportPreview() {
   }
   document.getElementById('importCardsBody').innerHTML = cardsHtml;
 
+  var dupIdx = [];
+  importDupReasons.forEach(function(r, i) { if (r) dupIdx.push(i); });
+  var dupEl = document.getElementById('importDupStatus');
+  var removeDups = document.getElementById('importRemoveDups').checked;
+  dupEl.classList.toggle('has-dups', dupIdx.length > 0);
+  if (dupIdx.length) {
+    var names = dupIdx.slice(0, 5).map(function(i) { return '"' + importParsed[i].front + '"'; }).join(', ');
+    if (dupIdx.length > 5) names += ', …';
+    dupEl.textContent = dupIdx.length + ' duplicate' + (dupIdx.length !== 1 ? 's' : '') +
+      (removeDups ? ' removed: ' : ' (will be imported anyway): ') + names;
+  } else if (importDupReasons.length) {
+    dupEl.textContent = 'No duplicates';
+  }
+
+  var k = importKeptIndexes().length;
   label.textContent = 'Preview — ' + n + ' card' + (n !== 1 ? 's' : '') + ' · ✦F = Front · ✦B = Back';
-  countEl.textContent = n + ' card' + (n !== 1 ? 's' : '') + ' ready';
-  btn.disabled = false;
-  btn.textContent = 'Import ' + n + ' card' + (n !== 1 ? 's' : '');
+  countEl.textContent = k + ' card' + (k !== 1 ? 's' : '') + ' ready';
+  btn.disabled = k === 0;
+  btn.textContent = 'Import ' + k + ' card' + (k !== 1 ? 's' : '');
   wrap.style.display = '';
   setImportView(importViewMode);
 }
@@ -1379,57 +1480,43 @@ function promptImportNewDeck() {
 function doImport() {
   if (!importParsed.length) return;
   var deck = document.getElementById('importDeck').value;
-  var notes = importParsed.map(function(c) {
-    return {
-      deckName: deck,
-      modelName: 'Basic',
-      fields: { Front: c.front, Back: c.back },
-      options: { allowDuplicate: false, duplicateScope: 'deck' },
-      tags: []
-    };
-  });
+  var removeDups = document.getElementById('importRemoveDups').checked;
+  var allNotes = buildImportNotes(deck, !removeDups);
+  var keep = importKeptIndexes();
+  var notes = keep.map(function(i) { return allNotes[i]; });
+  var removed = importParsed.length - notes.length;
+  if (!notes.length) return;
 
   var btn = document.getElementById('importDoBtn');
+  var resetBtn = function() {
+    btn.disabled = false;
+    btn.textContent = 'Import ' + notes.length + ' card' + (notes.length !== 1 ? 's' : '');
+  };
   btn.disabled = true;
-  btn.textContent = 'Checking…';
-  setStatus('Checking ' + notes.length + ' card(s) for duplicates…');
+  btn.textContent = 'Importing…';
+  setStatus('Importing ' + notes.length + ' card(s) into "' + deck + '"…');
 
-  // Preflight with canAddNotesWithErrorDetail so we know *which* cards are
-  // duplicates (and why) before importing, instead of AnkiConnect bulk-failing
-  // addNotes with one generic "cannot create note" message repeated N times.
-  anki('canAddNotesWithErrorDetail', { notes: notes })
-    .then(function(checks) {
-      var addable = [];
-      var skipped = [];
-      checks.forEach(function(chk, i) {
-        if (chk.canAdd) {
-          addable.push(notes[i]);
-        } else {
-          skipped.push({ front: importParsed[i].front, reason: chk.error });
-        }
-      });
+  // With "Remove duplicates" on, re-check right before adding (the deck may have
+  // changed since the preview check) so addNotes never bulk-fails.
+  var ready = removeDups
+    ? anki('canAddNotesWithErrorDetail', { notes: notes }).then(function(checks) {
+        var ok = notes.filter(function(_, i) { return checks[i].canAdd; });
+        removed += notes.length - ok.length;
+        return ok;
+      })
+    : Promise.resolve(notes);
 
-      if (skipped.length) {
-        console.log('[anki] skipped ' + skipped.length + ' duplicate/invalid card(s):');
-        skipped.forEach(function(s, i) {
-          console.log('  [' + (i + 1) + '] "' + s.front + '" — ' + s.reason);
-        });
-      }
-
-      if (!addable.length) {
-        setStatus('Nothing to import — all ' + skipped.length + ' card(s) were duplicates (see console for details).', 'err');
-        btn.disabled = false;
-        btn.textContent = 'Import ' + importParsed.length + ' cards';
+  ready
+    .then(function(toAdd) {
+      if (!toAdd.length) {
+        setStatus('Nothing to import — all cards were duplicates.', 'err');
+        resetBtn();
         return;
       }
-
-      btn.textContent = 'Importing…';
-      setStatus('Importing ' + addable.length + ' card(s) into "' + deck + '"…');
-
-      return anki('addNotes', { notes: addable }).then(function(results) {
+      return anki('addNotes', { notes: toAdd }).then(function(results) {
         var added = results.filter(function(id) { return id !== null; }).length;
         var msg = 'Imported ' + added + ' card' + (added !== 1 ? 's' : '') + ' into "' + deck + '"';
-        if (skipped.length) msg += ' (' + skipped.length + ' duplicate' + (skipped.length !== 1 ? 's' : '') + ' skipped — see console)';
+        if (removed) msg += ' (' + removed + ' duplicate' + (removed !== 1 ? 's' : '') + ' removed)';
         setStatus(msg, 'ok');
         closeImportModal();
         if (currentDeck === deck) loadDeck(deck);
@@ -1437,8 +1524,7 @@ function doImport() {
     })
     .catch(function(e) {
       setStatus('Import failed: ' + e.message, 'err');
-      btn.disabled = false;
-      btn.textContent = 'Import ' + importParsed.length + ' cards';
+      resetBtn();
     });
 }
 
