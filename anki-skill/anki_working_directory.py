@@ -6,15 +6,14 @@ with subfolders becoming subdecks:
     anki_working_directory/switchboard/safety.csv  ->  deck "switchboard::safety"
     anki_working_directory/bus_words.csv           ->  deck "bus_words"
 
-Each run makes every deck match its CSV:
+Works like `rclone copy`: CSV -> Anki, never deleting. Anki stays the full record.
     - new rows                 -> added
     - changed back             -> updated in place (review history kept)
     - row moved to another CSV -> card moved to that deck (review history kept)
-    - rows you deleted         -> deleted from Anki (asks first unless --yes)
+    - rows not in the CSV      -> kept in Anki, just counted in the summary
 
-Cards are matched by their Front text, so editing a Front counts as a delete
-plus an add and resets that card's progress. Decks without a CSV in the folder
-are never touched, and removing a CSV from the folder leaves its deck alone.
+Cards are matched by their Front text, so editing a Front adds a new card and
+leaves the old one in Anki. Decks without a CSV in the folder are never touched.
 Files ending in _glossed.csv are skipped: they're source material too big to
 study whole. Copy the rows you want into a new CSV and that one gets synced.
 
@@ -22,6 +21,13 @@ Usage:
     python anki_working_directory.py              # sync every CSV
     python anki_working_directory.py --dry-run    # show what would change
     python anki_working_directory.py --pull "Deck Name"   # deck -> CSV, to start editing an existing deck
+    python anki_working_directory.py --sheet "switchboard"  # Google Sheet -> folder of CSVs, then sync
+
+--sheet takes a spreadsheet's name, URL or ID (repeatable). The spreadsheet
+becomes a folder and each tab becomes a CSV in it, so spreadsheet "switchboard"
+with tabs paint and safety gives decks switchboard::paint and switchboard::safety.
+The tabs overwrite those CSVs each time; nothing else in the folder changes.
+Uses the Google sign-in from gsheet_bridge.py (client_secret.json + gsheet_token.json).
 
 CSV format: column 1 is the Front, every other column joins into the Back
 (one line each, blanks skipped), so Chinese,Pinyin,English gives a Back of
@@ -40,6 +46,7 @@ import csv
 import html
 import io
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -121,7 +128,7 @@ def read_deck(deck: str) -> tuple[dict[str, dict], int]:
 
 # ── Sync ──────────────────────────────────────────────────────────────────────
 
-def sync(paths: list[Path], dry_run: bool, assume_yes: bool) -> None:
+def sync(paths: list[Path], dry_run: bool) -> None:
     wanted = {deck_name(p): read_csv(p) for p in paths}
     current, skipped = {}, {}
     for deck in wanted:
@@ -143,13 +150,13 @@ def sync(paths: list[Path], dry_run: bool, assume_yes: bool) -> None:
     for deck, cards in wanted.items():
         have = current[deck]
         to_add = [f for f in cards if f not in have]
-        to_delete = [f for f in have if f not in cards]
+        extra = sum(1 for f in have if f not in cards)
         to_update = [f for f in cards if f in have
                      and (cards[f] != have[f]["back"] or have[f]["tags"])]
         moved_in = [(f, src) for f, src, dst in moves if dst == deck]
 
         print(f"{deck}: {len(cards)} in CSV  →  +{len(to_add)} add, ~{len(to_update)} update, "
-              f">{len(moved_in)} moved in, -{len(to_delete)} delete")
+              f">{len(moved_in)} moved in" + (f", {extra} only in Anki (kept)" if extra else ""))
         if skipped[deck]:
             print(f"  ({skipped[deck]} non-{MODEL} notes in this deck are left alone)")
         if dry_run:
@@ -159,8 +166,6 @@ def sync(paths: list[Path], dry_run: bool, assume_yes: bool) -> None:
                 print(f"  > {short(f)}  (from {src})")
             for f in to_update:
                 print(f"  ~ {short(f)}")
-            for f in to_delete:
-                print(f"  - {short(f)}")
             continue
 
         if to_add or moved_in:
@@ -183,27 +188,54 @@ def sync(paths: list[Path], dry_run: bool, assume_yes: bool) -> None:
             if got["tags"]:
                 _invoke("removeTags", notes=[nid], tags=" ".join(got["tags"]))
 
-        if to_delete:
-            for f in to_delete:
-                print(f"  - {short(f)}")
-            if assume_yes or input(f"  Delete these {len(to_delete)} card(s) and their review history? [y/N] ").strip().lower() == "y":
-                _invoke("deleteNotes", notes=[have[f]["id"] for f in to_delete])
-            else:
-                print("  kept them; delete them in Anki or add the rows back to stop this prompt")
-
     # Re-read Anki and compare against the CSVs, so a card that silently didn't land shows up here.
     in_csv = sum(len(cards) for cards in wanted.values())
     if dry_run:
         print(f"\nTotal: {in_csv} cards in CSVs, {before} in Anki now (dry run, nothing changed)")
         return
-    after = 0
+    after, missing = 0, 0
     for deck, cards in wanted.items():
-        n = len(read_deck(deck)[0])
-        after += n
-        if n != len(cards):
-            print(f"  ! {deck}: {len(cards)} in CSV but {n} in Anki")
+        notes = read_deck(deck)[0]
+        after += len(notes)
+        lost = [f for f in cards if f not in notes]
+        missing += len(lost)
+        if lost:
+            print(f"  ! {deck}: {len(lost)} CSV row(s) not in Anki, e.g. {short(lost[0])}")
     print(f"\nTotal: {in_csv} cards in CSVs, Anki went {before} → {after}"
-          + ("  ✓ match" if after == in_csv else "  ✗ MISMATCH, see ! lines above"))
+          + ("  ✓ every CSV row is in Anki" if not missing else f"  ✗ {missing} missing, see ! lines above"))
+
+
+# ── Google Sheets: spreadsheet -> folder, tab -> CSV ──────────────────────────
+
+def safe_name(name: str) -> str:
+    return re.sub(r'[/\\:]', "-", name).strip()
+
+
+def fetch_sheet(ref: str) -> None:
+    """Export every tab of a Google Sheet to WORK_DIR/<spreadsheet>/<tab>.csv."""
+    from googleapiclient.discovery import build
+    from gsheet_bridge import fetch_workbook, get_credentials, sheet_to_csv, sign_in
+
+    creds = get_credentials() or sign_in()
+    drive = build("drive", "v3", credentials=creds)
+    m = re.search(r"/d/([\w-]+)", ref)
+    if m or re.fullmatch(r"[\w-]{25,}", ref):
+        file_id = m.group(1) if m else ref
+        name = drive.files().get(fileId=file_id, fields="name").execute()["name"]
+    else:
+        q = ("mimeType='application/vnd.google-apps.spreadsheet' and trashed=false "
+             f"and name='{ref.replace(chr(39), chr(92) + chr(39))}'")
+        found = drive.files().list(q=q, fields="files(id, name)").execute().get("files", [])
+        if len(found) != 1:
+            sys.exit(f'{len(found)} Google Sheets named "{ref}"; pass its URL instead')
+        file_id, name = found[0]["id"], found[0]["name"]
+
+    wb = fetch_workbook(creds, file_id)
+    folder = WORK_DIR / safe_name(name)
+    folder.mkdir(parents=True, exist_ok=True)
+    for tab in wb.sheetnames:
+        (folder / f"{safe_name(tab)}.csv").write_text(sheet_to_csv(wb, tab), encoding="utf-8")
+    print(f'Google Sheet "{name}" -> {folder.name}/ ({len(wb.sheetnames)} tabs: {", ".join(wb.sheetnames)})')
 
 
 # ── Pull: deck -> CSV ─────────────────────────────────────────────────────────
@@ -225,11 +257,14 @@ def pull(deck: str) -> None:
 def main():
     p = argparse.ArgumentParser(description=f"Mirror CSVs in {WORK_DIR} into Anki decks.")
     p.add_argument("--dry-run", action="store_true", help="show changes without making them")
-    p.add_argument("--yes", action="store_true", help="delete removed rows without asking")
     p.add_argument("--pull", metavar="DECK", help="write an existing deck out as a CSV in the folder")
+    p.add_argument("--sheet", action="append", default=[], metavar="NAME_OR_URL",
+                   help="export a Google Sheet's tabs into the folder as CSVs before syncing (repeatable)")
     args = p.parse_args()
 
     WORK_DIR.mkdir(exist_ok=True)
+    for ref in args.sheet:
+        fetch_sheet(ref)
     try:
         if args.pull:
             return pull(args.pull)
@@ -239,7 +274,7 @@ def main():
         if not paths:
             print(f"No CSVs in {WORK_DIR}. Drop some in (path = deck name) and rerun.")
             return
-        sync(paths, args.dry_run, args.yes)
+        sync(paths, args.dry_run)
     except ConnectionError as e:
         sys.exit(str(e))
 
