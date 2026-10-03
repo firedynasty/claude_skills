@@ -28,7 +28,7 @@ as $$
 $$;
 
 -- CSV uploads by deck: anki_manager.html "Upload" upserts a CSV here (via
--- /api/anki-inbox). On the Mac, `python anki_working_directory.py --download`
+-- /api/supabase?action=inbox). On the Mac, `python anki_working_directory.py --download`
 -- writes each deck to anki_working_directory/<deck path>.csv, then syncs.
 -- deck is the full deck name and the id: "switchboard::safety" ->
 -- switchboard/safety.csv. Uploading the same deck again replaces its CSV.
