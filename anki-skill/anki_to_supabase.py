@@ -4,7 +4,7 @@ Sync Anki decks to Supabase.
 
 Usage:
     python anki_to_supabase.py --list                     # list all decks
-    python anki_to_supabase.py --deck "module_5"          # sync one deck
+    python anki_to_supabase.py --deck "module_5"          # sync one deck (and its subdecks)
     python anki_to_supabase.py --deck "Chinese Grammar Wiki"
     python anki_to_supabase.py --all                      # sync everything
 
@@ -65,7 +65,10 @@ def get_deck_names() -> list[str]:
 
 
 def get_notes_for_deck(deck: str) -> list[dict]:
-    ids = anki("findNotes", query=f'deck:"{deck}"')
+    # Only this deck's own notes, not its subdecks': `deck:"X"` alone includes
+    # X::* too, which labelled subdeck cards with the parent's name. Each
+    # subdeck is synced under its own full name (--all covers every subdeck).
+    ids = anki("findNotes", query=f'"deck:{deck}" -"deck:{deck}::*"')
     if not ids:
         return []
     notes = []
@@ -159,7 +162,7 @@ def main():
     group  = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--list",         action="store_true", help="List available Anki decks")
     group.add_argument("--all",          action="store_true", help="Sync all decks")
-    group.add_argument("--deck",         metavar="DECK",      help='Sync one deck, e.g. --deck "module_5"')
+    group.add_argument("--deck",         metavar="DECK",      help='Sync one deck and its subdecks, e.g. --deck "switchboard"')
     args = parser.parse_args()
 
     if args.list:
@@ -176,7 +179,12 @@ def main():
         for deck in decks:
             sync_deck(sb, deck)
     else:
-        sync_deck(sb, args.deck)
+        # The deck plus its subdecks, each stored under its own full name.
+        matched = [d for d in get_deck_names() if d == args.deck or d.startswith(args.deck + "::")]
+        if not matched:
+            sys.exit(f'No Anki deck named "{args.deck}" (see --list)')
+        for deck in matched:
+            sync_deck(sb, deck)
 
     print("\nDone. 🎉")
 

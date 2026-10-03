@@ -26,3 +26,15 @@ language sql stable
 as $$
   select distinct deck from flashcards order by deck;
 $$;
+
+-- CSV uploads by deck: anki_manager.html "Upload" upserts a CSV here (via
+-- /api/anki-inbox). On the Mac, `python anki_working_directory.py --download`
+-- writes each deck to anki_working_directory/<deck path>.csv, then syncs.
+-- deck is the full deck name and the id: "switchboard::safety" ->
+-- switchboard/safety.csv. Uploading the same deck again replaces its CSV.
+create table if not exists anki_decks (
+  deck       text primary key,
+  csv        text not null,
+  rows       int,
+  updated_at timestamptz default now()
+);

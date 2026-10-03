@@ -22,12 +22,20 @@ Usage:
     python anki_working_directory.py --dry-run    # show what would change
     python anki_working_directory.py --pull "Deck Name"   # deck -> CSV, to start editing an existing deck
     python anki_working_directory.py --sheet "switchboard"  # Google Sheet -> folder of CSVs, then sync
+    python anki_working_directory.py --download   # decks uploaded to Supabase -> folder of CSVs, then sync
 
 --sheet takes a spreadsheet's name, URL or ID (repeatable). The spreadsheet
 becomes a folder and each tab becomes a CSV in it, so spreadsheet "switchboard"
 with tabs paint and safety gives decks switchboard::paint and switchboard::safety.
 The tabs overwrite those CSVs each time; nothing else in the folder changes.
 Uses the Google sign-in from gsheet_bridge.py (client_secret.json + gsheet_token.json).
+
+--download fetches the CSVs uploaded from anki_manager.html (Supabase table
+anki_decks). Each deck becomes a CSV the same way: "switchboard::safety"
+-> switchboard/safety.csv. Only decks uploaded since the last download are
+written, so a CSV you edited here is only replaced when that deck is uploaded
+again. Needs SUPABASE_URL and SUPABASE_KEY (same as anki_to_supabase.py).
+Like --sheet, it writes the CSVs even with --dry-run; only Anki is left alone.
 
 CSV format: column 1 is the Front, every other column joins into the Back
 (one line each, blanks skipped), so Chinese,Pinyin,English gives a Back of
@@ -45,9 +53,12 @@ import argparse
 import csv
 import html
 import io
+import json
 import os
 import re
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 from anki_connect import _invoke
@@ -238,6 +249,46 @@ def fetch_sheet(ref: str) -> None:
     print(f'Google Sheet "{name}" -> {folder.name}/ ({len(wb.sheetnames)} tabs: {", ".join(wb.sheetnames)})')
 
 
+# ── Supabase: uploaded deck -> CSV ─────────────────────────────────────────────────
+
+DOWNLOAD_STATE = WORK_DIR / ".supabase_downloads.json"  # {deck: updated_at last written}
+
+
+def download_decks() -> None:
+    """Write each deck uploaded to Supabase since the last download to WORK_DIR/<deck path>.csv."""
+    url, key = os.environ.get("SUPABASE_URL", "").rstrip("/"), os.environ.get("SUPABASE_KEY", "")
+    if not url or not key:
+        sys.exit("--download needs SUPABASE_URL and SUPABASE_KEY (same as anki_to_supabase.py)")
+    req = urllib.request.Request(f"{url}/rest/v1/anki_decks?select=deck,csv,updated_at&order=deck",
+                                 headers={"apikey": key, "Authorization": f"Bearer {key}"})
+    try:
+        with urllib.request.urlopen(req) as r:
+            rows = json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        sys.exit(f"Supabase download failed: {e.code} {e.read().decode()[:300]}")
+    except urllib.error.URLError as e:
+        sys.exit(f"Can't reach Supabase at {url}: {e.reason}")
+
+    state = json.loads(DOWNLOAD_STATE.read_text()) if DOWNLOAD_STATE.exists() else {}
+    written = 0
+    for row in rows:
+        parts = [safe_name(part) for part in row["deck"].split("::")]
+        if any(part in ("", ".", "..") for part in parts):
+            print(f'  ! skipped deck "{row["deck"]}": not a usable deck name')
+            continue
+        out = WORK_DIR.joinpath(*parts[:-1], parts[-1] + ".csv")
+        if state.get(row["deck"]) == row["updated_at"] and out.exists():
+            continue
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(row["csv"], encoding="utf-8")
+        state[row["deck"]] = row["updated_at"]
+        written += 1
+        print(f'Supabase "{row["deck"]}" -> {out.relative_to(WORK_DIR)}')
+    DOWNLOAD_STATE.write_text(json.dumps(state, indent=1, ensure_ascii=False))
+    print(f"Downloaded {written} new/updated deck{'' if written == 1 else 's'}"
+          f" ({len(rows) - written} unchanged)\n")
+
+
 # ── Pull: deck -> CSV ─────────────────────────────────────────────────────────
 
 def pull(deck: str) -> None:
@@ -260,11 +311,15 @@ def main():
     p.add_argument("--pull", metavar="DECK", help="write an existing deck out as a CSV in the folder")
     p.add_argument("--sheet", action="append", default=[], metavar="NAME_OR_URL",
                    help="export a Google Sheet's tabs into the folder as CSVs before syncing (repeatable)")
+    p.add_argument("--download", action="store_true",
+                   help="write decks uploaded to Supabase into the folder as CSVs before syncing")
     args = p.parse_args()
 
     WORK_DIR.mkdir(exist_ok=True)
     for ref in args.sheet:
         fetch_sheet(ref)
+    if args.download:
+        download_decks()
     try:
         if args.pull:
             return pull(args.pull)

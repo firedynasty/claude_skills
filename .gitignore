@@ -14,3 +14,6 @@ client_secret.json
 
 # Personal vocab data (CSV imports) — keep local, not part of the public repo
 *.csv
+
+# Supabase download bookkeeping for anki_working_directory.py --download
+.supabase_downloads.json
