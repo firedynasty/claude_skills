@@ -34,7 +34,7 @@ Uses the Google sign-in from gsheet_bridge.py (client_secret.json + gsheet_token
 anki_decks). Each deck becomes a CSV the same way: "switchboard::safety"
 -> switchboard/safety.csv. Only decks uploaded since the last download are
 written, so a CSV you edited here is only replaced when that deck is uploaded
-again. Needs SUPABASE_URL and SUPABASE_KEY (same as anki_to_supabase.py).
+again. Needs FLASHCARDS_SUPABASE_URL and FLASHCARDS_SUPABASE_KEY (same as anki_to_supabase.py).
 Like --sheet, it writes the CSVs even with --dry-run; only Anki is left alone.
 
 CSV format: column 1 is the Front, every other column joins into the Back
@@ -256,9 +256,9 @@ DOWNLOAD_STATE = WORK_DIR / ".supabase_downloads.json"  # {deck: updated_at last
 
 def download_decks() -> None:
     """Write each deck uploaded to Supabase since the last download to WORK_DIR/<deck path>.csv."""
-    url, key = os.environ.get("SUPABASE_URL", "").rstrip("/"), os.environ.get("SUPABASE_KEY", "")
+    url, key = os.environ.get("FLASHCARDS_SUPABASE_URL", "").rstrip("/"), os.environ.get("FLASHCARDS_SUPABASE_KEY", "")
     if not url or not key:
-        sys.exit("--download needs SUPABASE_URL and SUPABASE_KEY (same as anki_to_supabase.py)")
+        sys.exit("--download needs FLASHCARDS_SUPABASE_URL and FLASHCARDS_SUPABASE_KEY (same as anki_to_supabase.py)")
     req = urllib.request.Request(f"{url}/rest/v1/anki_decks?select=deck,csv,updated_at&order=deck",
                                  headers={"apikey": key, "Authorization": f"Bearer {key}"})
     try:

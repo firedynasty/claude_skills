@@ -32,8 +32,8 @@ Table columns: `id`, `anki_id` (unique), `deck`, `model`, `front`, `back`, `fiel
 Anki must be open with the AnkiConnect add-on running.
 
 ```bash
-export SUPABASE_URL=https://xxxx.supabase.co
-export SUPABASE_KEY=your-service-role-or-anon-key
+export FLASHCARDS_SUPABASE_URL=https://xxxx.supabase.co
+export FLASHCARDS_SUPABASE_KEY=your-service-role-or-anon-key
 
 # List available decks
 python anki_to_supabase.py --list
@@ -63,8 +63,8 @@ Edit `FIELD_MAP` in `anki_to_supabase.py` to add more models.
 File: `vercel_flashcards/api/supabase.js`
 
 Set in Vercel dashboard → Settings → Environment Variables:
-- `SUPABASE_URL`
-- `SUPABASE_KEY`
+- `FLASHCARDS_SUPABASE_URL`
+- `FLASHCARDS_SUPABASE_KEY`
 
 Endpoints:
 ```

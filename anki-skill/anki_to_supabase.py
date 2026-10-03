@@ -12,8 +12,8 @@ Requires:
     pip install supabase
 
 Env vars (or edit the constants below):
-    SUPABASE_URL=https://xxxx.supabase.co
-    SUPABASE_KEY=your-anon-or-service-role-key
+    FLASHCARDS_SUPABASE_URL=https://xxxx.supabase.co
+    FLASHCARDS_SUPABASE_KEY=your-anon-or-service-role-key
 """
 
 import sys
@@ -26,8 +26,8 @@ from typing import Any
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 ANKI_URL     = "http://localhost:8765"
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
+FLASHCARDS_SUPABASE_URL = os.environ.get("FLASHCARDS_SUPABASE_URL", "")
+FLASHCARDS_SUPABASE_KEY = os.environ.get("FLASHCARDS_SUPABASE_KEY", "")
 BATCH_SIZE   = 50   # notes per AnkiConnect batch
 
 # How to map each model's fields to front/back for the study view.
@@ -120,14 +120,14 @@ def build_record(note: dict, deck: str) -> dict:
 
 # ── Supabase ───────────────────────────────────────────────────────────────────
 def get_supabase():
-    if not SUPABASE_URL or not SUPABASE_KEY:
-        print("❌  SUPABASE_URL and SUPABASE_KEY must be set.", file=sys.stderr)
-        print("    export SUPABASE_URL=https://xxxx.supabase.co", file=sys.stderr)
-        print("    export SUPABASE_KEY=your-key", file=sys.stderr)
+    if not FLASHCARDS_SUPABASE_URL or not FLASHCARDS_SUPABASE_KEY:
+        print("❌  FLASHCARDS_SUPABASE_URL and FLASHCARDS_SUPABASE_KEY must be set.", file=sys.stderr)
+        print("    export FLASHCARDS_SUPABASE_URL=https://xxxx.supabase.co", file=sys.stderr)
+        print("    export FLASHCARDS_SUPABASE_KEY=your-key", file=sys.stderr)
         sys.exit(1)
     try:
         from supabase import create_client
-        return create_client(SUPABASE_URL, SUPABASE_KEY)
+        return create_client(FLASHCARDS_SUPABASE_URL, FLASHCARDS_SUPABASE_KEY)
     except ImportError:
         print("❌  supabase not installed. Run: pip install supabase", file=sys.stderr)
         sys.exit(1)
