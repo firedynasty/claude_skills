@@ -3,8 +3,13 @@
 Mirror a folder of CSVs into Anki decks. The path inside the folder is the deck name,
 with subfolders becoming subdecks:
 
-    anki_working_directory/switchboard/safety.csv  ->  deck "switchboard::safety"
-    anki_working_directory/bus_words.csv           ->  deck "bus_words"
+    switchboard/safety.csv  ->  deck "switchboard::safety"
+    bus_words.csv           ->  deck "bus_words"
+
+The folder is ~/Library/CloudStorage/Dropbox/study/anki (Dropbox, so the CSVs
+are reachable from any device). Set ANKI_WORK_DIR to use another folder.
+Dropbox online-only files are fine: listing downloads nothing, and only the
+CSVs that get synced are read (_glossed files are skipped by name, unread).
 
 Works like `rclone copy`: CSV -> Anki, never deleting. Anki stays the full record.
     - new rows                 -> added
@@ -22,23 +27,12 @@ Usage:
     python anki_working_directory.py --dry-run    # show what would change
     python anki_working_directory.py --pull "Deck Name"   # deck -> CSV, to start editing an existing deck
     python anki_working_directory.py --sheet "switchboard"  # Google Sheet -> folder of CSVs, then sync
-    python anki_working_directory.py --download   # decks uploaded to Supabase -> folder of CSVs, then sync
 
 --sheet takes a spreadsheet's name, URL or ID (repeatable). The spreadsheet
 becomes a folder and each tab becomes a CSV in it, so spreadsheet "switchboard"
 with tabs paint and safety gives decks switchboard::paint and switchboard::safety.
 The tabs overwrite those CSVs each time; nothing else in the folder changes.
 Uses the Google sign-in from gsheet_bridge.py (client_secret.json + gsheet_token.json).
-
---download fetches the CSVs uploaded from anki_manager.html (Supabase table
-anki_decks). Each deck becomes a CSV the same way: "switchboard::safety"
--> switchboard/safety.csv. Supabase works like an inbox: each downloaded deck
-is removed from it, so the folder takes over from there (a CSV you delete here
-stays deleted unless you upload that deck again). Uploading a deck that's
-already in the folder overwrites its CSV on the next download.
-Needs FLASHCARDS_SUPABASE_URL and FLASHCARDS_SUPABASE_KEY (same as anki_to_supabase.py).
-With --dry-run the CSVs are still written for the preview, but Anki and
-Supabase are left alone.
 
 CSV format: column 1 is the Front, every other column joins into the Back
 (one line each, blanks skipped), so Chinese,Pinyin,English gives a Back of
@@ -56,19 +50,15 @@ import argparse
 import csv
 import html
 import io
-import json
 import os
 import re
 import sys
-import urllib.error
-import urllib.parse
-import urllib.request
 from pathlib import Path
 
 from anki_connect import _invoke
 
 # Set ANKI_WORK_DIR to use another folder.
-WORK_DIR = Path(os.environ.get("ANKI_WORK_DIR", Path(__file__).parent / "anki_working_directory")).expanduser()
+WORK_DIR = Path(os.environ.get("ANKI_WORK_DIR", "~/Library/CloudStorage/Dropbox/study/anki")).expanduser()
 MODEL = "Basic"
 SKIP_SUFFIX = "_glossed"  # source files, never synced
 SEPARATORS = {"comma": ",", "tab": "\t", "semicolon": ";", "pipe": "|", "space": " "}
@@ -253,52 +243,6 @@ def fetch_sheet(ref: str) -> None:
     print(f'Google Sheet "{name}" -> {folder.name}/ ({len(wb.sheetnames)} tabs: {", ".join(wb.sheetnames)})')
 
 
-# ── Supabase: uploaded deck -> CSV ─────────────────────────────────────────────
-
-def download_decks(dry_run: bool) -> None:
-    """Write each deck waiting in Supabase to WORK_DIR/<deck path>.csv, then remove it from Supabase.
-
-    anki_decks works like an inbox: once a deck is in the folder, the folder (and
-    Anki) take over, so a CSV you later delete here can't come back from Supabase.
-    With --dry-run the CSVs are written for the preview but Supabase is left as is.
-    """
-    url, key = os.environ.get("FLASHCARDS_SUPABASE_URL", "").rstrip("/"), os.environ.get("FLASHCARDS_SUPABASE_KEY", "")
-    if not url or not key:
-        sys.exit("--download needs FLASHCARDS_SUPABASE_URL and FLASHCARDS_SUPABASE_KEY (same as anki_to_supabase.py)")
-    headers = {"apikey": key, "Authorization": f"Bearer {key}"}
-
-    def call(method: str, path: str):
-        req = urllib.request.Request(f"{url}/rest/v1/{path}", method=method, headers=headers)
-        try:
-            with urllib.request.urlopen(req) as r:
-                body = r.read()
-                return json.loads(body) if body else None
-        except urllib.error.HTTPError as e:
-            sys.exit(f"Supabase {method} failed: {e.code} {e.read().decode()[:300]}")
-        except urllib.error.URLError as e:
-            sys.exit(f"Can't reach Supabase at {url}: {e.reason}")
-
-    rows = call("GET", "anki_decks?select=deck,csv,updated_at&order=deck")
-    if not rows:
-        print("No uploads waiting in Supabase.\n")
-        return
-    for row in rows:
-        parts = [safe_name(part) for part in row["deck"].split("::")]
-        if any(part in ("", ".", "..") for part in parts):
-            print(f'  ! skipped deck "{row["deck"]}": not a usable deck name (left in Supabase)')
-            continue
-        out = WORK_DIR.joinpath(*parts[:-1], parts[-1] + ".csv")
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(row["csv"], encoding="utf-8")
-        print(f'Supabase "{row["deck"]}" -> {out.relative_to(WORK_DIR)}')
-        if not dry_run:
-            # Only this exact upload: a newer upload of the same deck stays for next time.
-            q = urllib.parse.urlencode({"deck": f"eq.{row['deck']}", "updated_at": f"eq.{row['updated_at']}"})
-            call("DELETE", f"anki_decks?{q}")
-    print(f"Downloaded {len(rows)} deck{'' if len(rows) == 1 else 's'}"
-          + (" (dry run: left in Supabase)" if dry_run else ", removed from Supabase") + "\n")
-
-
 # ── Pull: deck -> CSV ─────────────────────────────────────────────────────────
 
 def pull(deck: str) -> None:
@@ -321,15 +265,13 @@ def main():
     p.add_argument("--pull", metavar="DECK", help="write an existing deck out as a CSV in the folder")
     p.add_argument("--sheet", action="append", default=[], metavar="NAME_OR_URL",
                    help="export a Google Sheet's tabs into the folder as CSVs before syncing (repeatable)")
-    p.add_argument("--download", action="store_true",
-                   help="write decks uploaded to Supabase into the folder as CSVs before syncing")
     args = p.parse_args()
 
+    if not WORK_DIR.parent.is_dir():
+        sys.exit(f"{WORK_DIR.parent} not found: is Dropbox running and signed in? (or set ANKI_WORK_DIR)")
     WORK_DIR.mkdir(exist_ok=True)
     for ref in args.sheet:
         fetch_sheet(ref)
-    if args.download:
-        download_decks(args.dry_run)
     try:
         if args.pull:
             return pull(args.pull)
