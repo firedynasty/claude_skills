@@ -64,7 +64,8 @@ SKIP_SUFFIX = "_glossed"  # source files, never synced
 SEPARATORS = {"comma": ",", "tab": "\t", "semicolon": ";", "pipe": "|", "space": " "}
 # Same list anki-manager.html uses to spot a header row.
 HEADER_WORDS = {"chinese", "pinyin", "definition", "term", "front", "back", "english", "word",
-                "vocab", "vocabulary", "language", "pronunciation", "中文", "translation"}
+                "vocab", "vocabulary", "language", "pronunciation", "中文", "translation",
+                "question", "answer"}
 
 
 def deck_name(path: Path) -> str:
